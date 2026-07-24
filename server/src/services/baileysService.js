@@ -1,4 +1,4 @@
-const { makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const P = require('pino');
 const fs = require('fs');
 const path = require('path');
@@ -28,11 +28,14 @@ const startSession = async (channelId, sessionId, tenantId) => {
 
   const dir = path.join(sessionPath, sessionId);
   const { state, saveCreds } = await useMultiFileAuthState(dir);
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
+    version,
     auth: state,
     logger: P({ level: 'error' }),
-    browser: ['CRM Plugin', 'Chrome', '1.0.0'],
+    printQRInTerminal: false,
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
   });
 
   sessions.set(channelId, sock);
@@ -52,11 +55,15 @@ const startSession = async (channelId, sessionId, tenantId) => {
 
     if (connection === 'close') {
       qrs.delete(channelId);
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log(`[Baileys] Connection closed. Should reconnect: ${shouldReconnect}`);
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log(`[Baileys] Connection closed. Status code: ${statusCode}. Error:`, lastDisconnect?.error);
+      console.log(`[Baileys] Should reconnect: ${shouldReconnect}`);
       if (shouldReconnect) {
         sessions.delete(channelId);
-        startSession(channelId, sessionId, tenantId);
+        setTimeout(() => {
+          startSession(channelId, sessionId, tenantId);
+        }, 2000); // Add a 2s delay to prevent tight infinite loop
       } else {
         sessions.delete(channelId);
         // Clear session folder
