@@ -22,12 +22,12 @@ if (!fs.existsSync(sessionPath)) {
 }
 
 const startWhatsApp = async () => {
-  const state = await useMultiFileAuthState(path.join(sessionPath, sessionId));
-  const { saveCreds } = state;
+  const authResult = await useMultiFileAuthState(path.join(sessionPath, sessionId));
+  const authState = authResult.state;
+  const { saveCreds } = authResult;
 
   sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: true,
+    auth: authState,
     logger: P({ level: 'silent' }),
     browser: ['CRM Plugin', 'Chrome', '1.0.0'],
     getMessage: async (key) => {

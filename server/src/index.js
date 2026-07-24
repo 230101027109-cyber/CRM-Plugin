@@ -35,7 +35,7 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   await connectDB();
-  await connectRedis();
+  // await connectRedis();
 
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

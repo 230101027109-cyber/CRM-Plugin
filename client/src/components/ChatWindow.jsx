@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { contactsAPI, messagesAPI } from '../services/api';
-import { useSocket } from '../hooks/useSocket';
+import { useSocket } from '../hooks/useSocket.jsx';
 import moment from 'moment';
 import { Send, Phone, Search, Smile, Paperclip, MoreVertical, ArrowLeft } from 'lucide-react';
 

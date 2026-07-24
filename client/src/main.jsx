@@ -1,8 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { SocketProvider } from './hooks/useSocket'
-import { AuthProvider } from './hooks/useAuth'
+import { SocketProvider } from './hooks/useSocket.jsx'
+import { AuthProvider } from './hooks/useAuth.jsx'
 import App from './App'
 import './index.css'
 

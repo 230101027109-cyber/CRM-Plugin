@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { contactsAPI } from '../services/api';
 import { whatsappAPI } from '../services/api';
-import { useSocket } from '../hooks/useSocket';
-import { useAuth } from '../hooks/useAuth';
+import { useSocket } from '../hooks/useSocket.jsx';
+import { useAuth } from '../hooks/useAuth.jsx';
 import moment from 'moment';
 
 const ChatList = ({ onSelectChat, activeChat }) => {

@@ -4,7 +4,7 @@ import Login from './pages/Login';
 import Chats from './pages/Chats';
 import Contacts from './pages/Contacts';
 import Groups from './pages/Groups';
-import { useAuth } from './hooks/useAuth';
+import { useAuth } from './hooks/useAuth.jsx';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();

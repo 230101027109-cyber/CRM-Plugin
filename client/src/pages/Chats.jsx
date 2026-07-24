@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { contactsAPI } from '../services/api';
-import { useSocket } from '../hooks/useSocket';
+import { useSocket } from '../hooks/useSocket.jsx';
 import ChatList from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import WhatsAppConnection from '../components/WhatsAppConnection';
