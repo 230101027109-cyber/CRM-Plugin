@@ -1,0 +1,19 @@
+{
+  "name": "crm-whatsapp",
+  "version": "1.0.0",
+  "description": "WhatsApp CRM Plugin using Bailey Service",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "dev": "npm run dev:server & npm run dev:client",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "setup": "npm run install:all"
+  }
+}
