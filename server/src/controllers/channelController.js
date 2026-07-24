@@ -11,6 +11,17 @@ const getChannels = async (req, res) => {
   }
 };
 
+const getChannelById = async (req, res) => {
+  try {
+    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
+    if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+    res.json({ success: true, data: channel });
+  } catch (error) {
+    console.error('Error fetching channel by id:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 const createChannel = async (req, res) => {
   try {
     const { type, channelName, assignedTo } = req.body;
@@ -19,11 +30,15 @@ const createChannel = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Type and name are required' });
     }
 
+    // Lookup user to get their ObjectId for the assignedTo ref
+    const User = require('../models/User');
+    const user = await User.findOne({ userId: req.user.userId });
+
     const channel = new Channel({
       tenantId: req.user.tenantId,
       type,
       channelName,
-      assignedTo: assignedTo || req.user.userId,
+      assignedTo: assignedTo || user._id,
       sessionId: `session_${req.user.tenantId}_${Date.now()}`
     });
 
@@ -97,10 +112,25 @@ const disconnectChannel = async (req, res) => {
   }
 };
 
+const getChannelQR = async (req, res) => {
+  try {
+    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
+    if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+    
+    const qr = whatsappService.getQR(channel.channelId);
+    res.json({ success: true, qr });
+  } catch (error) {
+    console.error('Error fetching channel QR:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 module.exports = {
   getChannels,
+  getChannelById,
   createChannel,
   deleteChannel,
   connectChannel,
-  disconnectChannel
+  disconnectChannel,
+  getChannelQR
 };

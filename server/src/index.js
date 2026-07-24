@@ -13,6 +13,7 @@ const healthRoutes = require('./routes/health');
 const channelsRoutes = require('./routes/channels');
 const ticketsRoutes = require('./routes/tickets');
 const workflowsRoutes = require('./routes/workflows');
+const loggerMiddleware = require('./middleware/logger');
 const path = require('path');
 
 const app = express();
@@ -21,6 +22,9 @@ const server = http.createServer(app);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Apply logger middleware to all routes
+app.use(loggerMiddleware);
 
 const io = initSocket(server);
 

@@ -24,7 +24,7 @@ const Login = () => {
     let res;
     if (activeTab === 'login') {
       res = await login({
-        email: loginMode === 'email' ? formData.email : undefined,
+        email: formData.email,
         pin: formData.pin
       });
     } else {
@@ -80,40 +80,17 @@ const Login = () => {
         <form onSubmit={handleSubmit} className="space-y-4">
           {activeTab === 'login' ? (
             <>
-              <div className="flex gap-4 mb-2">
-                <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={loginMode === 'email'}
-                    onChange={() => setLoginMode('email')}
-                    className="accent-green-500"
-                  />
-                  Email + PIN
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={loginMode === 'pin'}
-                    onChange={() => setLoginMode('pin')}
-                    className="accent-green-500"
-                  />
-                  PIN Only
-                </label>
+              <div className="relative">
+                <Mail size={18} className="absolute left-3 top-3.5 text-gray-400" />
+                <input
+                  type="email"
+                  name="email"
+                  value={values.email}
+                  onChange={handleChange}
+                  placeholder="Email address"
+                  className="w-full pl-10 pr-4 py-3 bg-[#2a3942] border border-transparent rounded-lg focus:outline-none focus:border-green-500 text-white placeholder-gray-500 transition-colors"
+                />
               </div>
-
-              {loginMode === 'email' && (
-                <div className="relative">
-                  <Mail size={18} className="absolute left-3 top-3.5 text-gray-400" />
-                  <input
-                    type="email"
-                    name="email"
-                    value={values.email}
-                    onChange={handleChange}
-                    placeholder="Email address"
-                    className="w-full pl-10 pr-4 py-3 bg-[#2a3942] border border-transparent rounded-lg focus:outline-none focus:border-green-500 text-white placeholder-gray-500 transition-colors"
-                  />
-                </div>
-              )}
               
               <div className="relative">
                 <Lock size={18} className="absolute left-3 top-3.5 text-gray-400" />

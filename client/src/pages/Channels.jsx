@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, Plus, Trash2, Power, PowerOff, Loader } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Radio, Plus, Trash2, Power, PowerOff, Loader, Settings2 } from 'lucide-react';
 import api from '../services/api';
-import { useSocket } from '../hooks/useSocket.jsx';
 
 const Channels = () => {
+  const navigate = useNavigate();
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [newChannel, setNewChannel] = useState({ type: 'baileys', channelName: '' });
-  const { qrCode } = useSocket();
 
   useEffect(() => {
     fetchChannels();
@@ -38,24 +38,6 @@ const Channels = () => {
       fetchChannels();
     } catch (error) {
       alert('Error creating channel');
-    }
-  };
-
-  const handleConnect = async (id) => {
-    try {
-      await api.post(`/channels/${id}/connect`);
-      fetchChannels();
-    } catch (error) {
-      alert('Error connecting');
-    }
-  };
-
-  const handleDisconnect = async (id) => {
-    try {
-      await api.post(`/channels/${id}/disconnect`);
-      fetchChannels();
-    } catch (error) {
-      alert('Error disconnecting');
     }
   };
 
@@ -130,22 +112,12 @@ const Channels = () => {
               </div>
 
               <div className="bg-gray-50 px-5 py-3 border-t border-gray-100 flex items-center justify-between">
-                {channel.status === 'connected' ? (
-                  <button 
-                    onClick={() => handleDisconnect(channel._id)}
-                    className="flex items-center gap-2 text-sm text-yellow-600 hover:text-yellow-700 font-medium"
-                  >
-                    <PowerOff size={16} /> Disconnect
-                  </button>
-                ) : (
-                  <button 
-                    onClick={() => handleConnect(channel._id)}
-                    disabled={channel.status === 'connecting'}
-                    className="flex items-center gap-2 text-sm text-green-600 hover:text-green-700 font-medium disabled:opacity-50"
-                  >
-                    <Power size={16} /> Connect
-                  </button>
-                )}
+                <button 
+                  onClick={() => navigate(`/channels/${channel._id}`)}
+                  className="flex items-center gap-2 text-sm text-green-600 hover:text-green-700 font-medium"
+                >
+                  <Settings2 size={16} /> Manage Channel
+                </button>
                 
                 <button 
                   onClick={() => handleDelete(channel._id)}
@@ -164,21 +136,6 @@ const Channels = () => {
               <p className="text-gray-500 mt-1">Connect a WhatsApp number to start receiving messages</p>
             </div>
           )}
-        </div>
-      )}
-
-      {/* QR Code Modal (Global from socket) */}
-      {qrCode && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-2xl shadow-2xl text-center max-w-sm w-full mx-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Scan QR Code</h3>
-            <p className="text-sm text-gray-500 mb-6">Open WhatsApp on your phone and link a device</p>
-            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 inline-block">
-              <pre className="text-[10px] font-mono leading-none tracking-tighter" style={{ fontFamily: 'monospace' }}>
-                {qrCode}
-              </pre>
-            </div>
-          </div>
         </div>
       )}
 

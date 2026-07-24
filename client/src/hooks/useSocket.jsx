@@ -35,6 +35,7 @@ export const SocketProvider = ({ children }) => {
     });
 
     newSocket.on('qr_code', (qr) => {
+      console.log('Received QR Code from server');
       setQrCode(qr);
     });
 

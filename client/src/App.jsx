@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Chats from './pages/Chats';
 import Contacts from './pages/Contacts';
 import Channels from './pages/Channels';
+import ChannelDetail from './pages/ChannelDetail';
 import Tickets from './pages/Tickets';
 import Workflows from './pages/Workflows';
 import Settings from './pages/Settings';
@@ -28,6 +29,7 @@ const App = () => {
         <Route path="/chats" element={<Chats />} />
         <Route path="/contacts" element={<Contacts />} />
         <Route path="/channels" element={<Channels />} />
+        <Route path="/channels/:id" element={<ChannelDetail />} />
         <Route path="/tickets" element={<Tickets />} />
         <Route path="/workflows" element={<Workflows />} />
         <Route path="/settings" element={<Settings />} />
