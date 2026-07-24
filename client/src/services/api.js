@@ -26,8 +26,11 @@ api.interceptors.response.use(
 );
 
 export const authAPI = {
-  login: (pin) => api.post('/auth/login', { pin }),
+  register: (data) => api.post('/auth/register', data),
+  login: (data) => api.post('/auth/login', data),
   verify: () => api.get('/auth/verify'),
+  getProfile: () => api.get('/auth/profile'),
+  updateProfile: (data) => api.put('/auth/profile', data),
 };
 
 export const whatsappAPI = {

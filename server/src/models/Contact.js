@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 
 const contactSchema = new mongoose.Schema({
-  jid: { type: String, unique: true, required: true, index: true },
+  tenantId: { type: String, required: true, index: true },
+  channelId: { type: String, required: true, index: true },
+  jid: { type: String, required: true, index: true },
   name: { type: String, default: '' },
   phone: { type: String, default: '' },
   pushName: { type: String, default: '' },
@@ -20,6 +22,7 @@ const contactSchema = new mongoose.Schema({
   notes: { type: String, default: '' },
 }, { timestamps: true });
 
+contactSchema.index({ tenantId: 1, jid: 1 }, { unique: true });
 contactSchema.index({ phone: 1 });
 contactSchema.index({ name: 1 });
 

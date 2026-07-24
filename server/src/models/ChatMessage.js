@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
 const chatMessageSchema = new mongoose.Schema({
+  tenantId: { type: String, required: true, index: true },
+  channelId: { type: String, required: true, index: true },
   messageId: { type: String, unique: true },
   remoteJid: { type: String, required: true, index: true },
   senderJid: { type: String, required: true },
@@ -13,6 +15,6 @@ const chatMessageSchema = new mongoose.Schema({
   participants: [{ type: String }],
 }, { timestamps: true });
 
-chatMessageSchema.index({ remoteJid: 1, timestamp: -1 });
+chatMessageSchema.index({ tenantId: 1, remoteJid: 1, timestamp: -1 });
 
 module.exports = mongoose.model('ChatMessage', chatMessageSchema);

@@ -10,7 +10,9 @@ const whatsappRoutes = require('./routes/whatsapp');
 const contactsRoutes = require('./routes/contacts');
 const messagesRoutes = require('./routes/messages');
 const healthRoutes = require('./routes/health');
-const { startWhatsApp } = require('./services/baileysService');
+const channelsRoutes = require('./routes/channels');
+const ticketsRoutes = require('./routes/tickets');
+const workflowsRoutes = require('./routes/workflows');
 const path = require('path');
 
 const app = express();
@@ -27,6 +29,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/channels', channelsRoutes);
+app.use('/api/tickets', ticketsRoutes);
+app.use('/api/workflows', workflowsRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '../public')));
 app.use('/data', express.static(path.join(__dirname, '../public')));
@@ -40,12 +45,6 @@ const startServer = async () => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
-
-  try {
-    await startWhatsApp();
-  } catch (error) {
-    console.error('Failed to start WhatsApp:', error.message);
-  }
 };
 
 startServer();

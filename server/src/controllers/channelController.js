@@ -1,0 +1,106 @@
+const Channel = require('../models/Channel');
+const whatsappService = require('../services/baileysService');
+
+const getChannels = async (req, res) => {
+  try {
+    const channels = await Channel.find({ tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
+    res.json({ success: true, data: channels });
+  } catch (error) {
+    console.error('Error fetching channels:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const createChannel = async (req, res) => {
+  try {
+    const { type, channelName, assignedTo } = req.body;
+    
+    if (!type || !channelName) {
+      return res.status(400).json({ success: false, message: 'Type and name are required' });
+    }
+
+    const channel = new Channel({
+      tenantId: req.user.tenantId,
+      type,
+      channelName,
+      assignedTo: assignedTo || req.user.userId,
+      sessionId: `session_${req.user.tenantId}_${Date.now()}`
+    });
+
+    await channel.save();
+    res.json({ success: true, data: channel });
+  } catch (error) {
+    console.error('Error creating channel:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const deleteChannel = async (req, res) => {
+  try {
+    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
+    if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+
+    // Disconnect if connected
+    if (channel.status === 'connected') {
+      await whatsappService.stopSession(channel.channelId);
+    }
+
+    await Channel.deleteOne({ _id: req.params.id });
+    res.json({ success: true, message: 'Channel deleted' });
+  } catch (error) {
+    console.error('Error deleting channel:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const connectChannel = async (req, res) => {
+  try {
+    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
+    if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+    
+    if (channel.type === 'whatsapp_business') {
+      return res.status(400).json({ success: false, message: 'WhatsApp Business coming soon' });
+    }
+
+    if (whatsappService.isSessionConnected(channel.channelId)) {
+      return res.json({ success: true, message: 'Already connected', status: 'connected' });
+    }
+
+    channel.status = 'connecting';
+    await channel.save();
+
+    // Start Baileys session asynchronously
+    whatsappService.startSession(channel.channelId, channel.sessionId, req.user.tenantId)
+      .catch(err => console.error(`Error starting session ${channel.channelId}:`, err));
+
+    res.json({ success: true, message: 'Initializing connection...' });
+  } catch (error) {
+    console.error('Error connecting channel:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const disconnectChannel = async (req, res) => {
+  try {
+    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
+    if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+
+    await whatsappService.stopSession(channel.channelId);
+    
+    channel.status = 'disconnected';
+    await channel.save();
+    
+    res.json({ success: true, message: 'Disconnected successfully' });
+  } catch (error) {
+    console.error('Error disconnecting channel:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = {
+  getChannels,
+  createChannel,
+  deleteChannel,
+  connectChannel,
+  disconnectChannel
+};

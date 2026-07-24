@@ -3,12 +3,16 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Chats from './pages/Chats';
 import Contacts from './pages/Contacts';
-import Groups from './pages/Groups';
+import Channels from './pages/Channels';
+import Tickets from './pages/Tickets';
+import Workflows from './pages/Workflows';
+import Settings from './pages/Settings';
+import DashboardLayout from './components/DashboardLayout';
 import { useAuth } from './hooks/useAuth.jsx';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  if (loading) return <div className="flex items-center justify-center h-screen bg-[#111b21] text-white">Loading...</div>;
   if (!user) return <Navigate to="/" replace />;
   return children;
 };
@@ -19,9 +23,15 @@ const App = () => {
   return (
     <Routes>
       <Route path="/" element={user ? <Navigate to="/chats" replace /> : <Login />} />
-      <Route path="/chats" element={<ProtectedRoute><Chats /></ProtectedRoute>} />
-      <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
-      <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
+      
+      <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+        <Route path="/chats" element={<Chats />} />
+        <Route path="/contacts" element={<Contacts />} />
+        <Route path="/channels" element={<Channels />} />
+        <Route path="/tickets" element={<Tickets />} />
+        <Route path="/workflows" element={<Workflows />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
     </Routes>
   );
 };

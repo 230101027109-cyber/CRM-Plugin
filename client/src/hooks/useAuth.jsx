@@ -26,14 +26,45 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const login = useCallback(async (pin) => {
-    const res = await authAPI.login(pin);
-    if (res.data.success) {
-      localStorage.setItem('crm_token', res.data.token);
-      setUser(res.data.user);
-      return { success: true };
+  const register = useCallback(async (data) => {
+    try {
+      const res = await authAPI.register(data);
+      if (res.data.success) {
+        localStorage.setItem('crm_token', res.data.token);
+        setUser(res.data.user);
+        return { success: true };
+      }
+      return { success: false, message: res.data.message };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Registration failed' };
     }
-    return { success: false, message: res.data.message };
+  }, []);
+
+  const login = useCallback(async (data) => {
+    try {
+      const res = await authAPI.login(data);
+      if (res.data.success) {
+        localStorage.setItem('crm_token', res.data.token);
+        setUser(res.data.user);
+        return { success: true };
+      }
+      return { success: false, message: res.data.message };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Login failed' };
+    }
+  }, []);
+
+  const updateProfile = useCallback(async (data) => {
+    try {
+      const res = await authAPI.updateProfile(data);
+      if (res.data.success) {
+        setUser(prev => ({ ...prev, ...res.data.user }));
+        return { success: true };
+      }
+      return { success: false, message: res.data.message };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Profile update failed' };
+    }
   }, []);
 
   const logout = useCallback(() => {
@@ -42,7 +73,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, register, updateProfile, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

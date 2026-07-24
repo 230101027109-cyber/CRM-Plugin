@@ -1,163 +1,125 @@
 const { makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const P = require('pino');
-const uuid = require('uuid');
-const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
-const qrcode = require('qrcode-terminal');
+const Channel = require('../models/Channel');
 
-let sock = null;
-let currentUserJid = null;
-let qrCodeHandler = null;
-let connectionStatusHandler = null;
-let messageHandler = null;
-let groupHandler = null;
-let contactUpdateHandler = null;
-let callsUpdateHandler = null;
+const sessions = new Map(); // Map to store multiple socket instances by channelId
+const sessionHandlers = new Map(); // Handlers per channel
+
 const sessionPath = path.resolve(process.env.STORE_PATH || path.join(__dirname, '../../data/baileys'));
-const sessionId = process.env.WHATSAPP_SESSION_ID || 'default';
 
 if (!fs.existsSync(sessionPath)) {
   fs.mkdirSync(sessionPath, { recursive: true });
 }
 
-const startWhatsApp = async () => {
-  const authResult = await useMultiFileAuthState(path.join(sessionPath, sessionId));
-  const authState = authResult.state;
-  const { saveCreds } = authResult;
+// Handlers that can be set externally (like from socket.io)
+let globalMessageHandler = null;
+let globalQRHandler = null;
 
-  sock = makeWASocket({
-    auth: authState,
+const setGlobalMessageHandler = (handler) => { globalMessageHandler = handler; };
+const setGlobalQRHandler = (handler) => { globalQRHandler = handler; };
+
+const startSession = async (channelId, sessionId, tenantId) => {
+  if (sessions.has(channelId)) {
+    return sessions.get(channelId);
+  }
+
+  const dir = path.join(sessionPath, sessionId);
+  const { state, saveCreds } = await useMultiFileAuthState(dir);
+
+  const sock = makeWASocket({
+    auth: state,
     logger: P({ level: 'silent' }),
     browser: ['CRM Plugin', 'Chrome', '1.0.0'],
-    getMessage: async (key) => {
-      if (messageHandler) await messageHandler(key);
-      return null;
-    },
   });
+
+  sessions.set(channelId, sock);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr && qrCodeHandler) {
-      await qrCodeHandler(qr);
+    if (qr && globalQRHandler) {
+      // Send QR to the specific tenant's room
+      globalQRHandler({ tenantId, channelId, qr });
     }
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Connection closed. Reconnecting:', shouldReconnect);
-      if (shouldReconnect && sessionId) {
-        await startWhatsApp();
+      if (shouldReconnect) {
+        sessions.delete(channelId);
+        startSession(channelId, sessionId, tenantId);
+      } else {
+        sessions.delete(channelId);
+        // Clear session folder
+        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+        // Update DB
+        await Channel.updateOne({ channelId }, { status: 'disconnected', connectedNumber: null });
       }
     } else if (connection === 'open') {
-      console.log('WhatsApp connected successfully');
-      currentUserJid = sock.user?.wid || sock.user?.id || '';
-
-      sock.ev.on('contacts.update', (updates) => {
-        if (contactUpdateHandler) contactUpdateHandler(updates);
+      const userJid = sock.user?.wid || sock.user?.id || '';
+      await Channel.updateOne({ channelId }, { 
+        status: 'connected', 
+        connectedNumber: userJid.split(':')[0] 
       });
-    } else if (connection === 'connecting') {
-      console.log('Connecting to WhatsApp...');
+      // Try sync contacts (using the new channel-aware logic later)
     }
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify' || !messageHandler) return;
+    if (type !== 'notify' || !globalMessageHandler) return;
     for (const msg of messages) {
-      await messageHandler(msg);
+      await globalMessageHandler({ tenantId, channelId, msg });
     }
-  });
-
-  sock.ev.on('groups.update', async (updates) => {
-    if (groupHandler) await groupHandler(updates);
-  });
-
-  sock.ev.on('contacts.update', async (updates) => {
-    if (contactUpdateHandler) await contactUpdateHandler(updates);
   });
 
   return sock;
 };
 
-const getSocket = () => sock;
-
-const isConnected = () => !!(sock && sock.user);
-
-const setQRHandler = (handler) => {
-  qrCodeHandler = handler;
+const stopSession = async (channelId) => {
+  const sock = sessions.get(channelId);
+  if (sock) {
+    await sock.logout();
+    sessions.delete(channelId);
+  }
 };
 
-const setConnectionStatusHandler = (handler) => {
-  connectionStatusHandler = handler;
+const getSession = (channelId) => {
+  return sessions.get(channelId);
 };
 
-const setMessageHandler = (handler) => {
-  messageHandler = handler;
+const isSessionConnected = (channelId) => {
+  const sock = sessions.get(channelId);
+  return !!(sock && sock.user);
 };
 
-const setGroupHandler = (handler) => {
-  groupHandler = handler;
-};
-
-const setContactUpdateHandler = (handler) => {
-  contactUpdateHandler = handler;
-};
-
-const setCallsUpdateHandler = (handler) => {
-  callsUpdateHandler = handler;
-};
-
-const sendMessage = async (jid, content, options = {}) => {
-  if (!sock || !sock.user) throw new Error('WhatsApp not connected');
+const sendMessage = async (channelId, jid, content, options = {}) => {
+  const sock = sessions.get(channelId);
+  if (!sock || !sock.user) throw new Error('WhatsApp not connected for this channel');
 
   const messageOptions = {};
-  if (options.quotedMessageId) {
-    messageOptions.quoted = options.quotedMessageId;
-  }
-
+  if (options.quotedMessageId) messageOptions.quoted = options.quotedMessageId;
   if (options.caption && ['image', 'video', 'document'].includes(options.type)) {
     messageOptions.caption = options.caption;
   }
 
   try {
-    const mediaService = require('./mediaService.js');
-    if (options.file && options.type) {
-      return await mediaService.sendMediaMessage(sock, jid, options);
-    }
-
     const result = await sock.sendMessage(jid, { text: content }, messageOptions);
     return { success: true, messageId: result?.key?.id, timestamp: new Date() };
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error(`Error sending message on channel ${channelId}:`, error);
     return { success: false, error: error.message };
   }
 };
 
-const getCurrentUserJid = () => currentUserJid;
-
-const getProfilePicture = async (jid) => {
-  if (!sock || !sock.user) throw new Error('WhatsApp not connected');
-  try {
-    const profilePic = await sock.profilePictureUrl(jid, 'image');
-    return profilePic;
-  } catch (error) {
-    return null;
-  }
-};
-
 module.exports = {
-  startWhatsApp,
-  getSocket,
-  isConnected,
-  setQRHandler,
-  setConnectionStatusHandler,
-  setMessageHandler,
-  setGroupHandler,
-  setContactUpdateHandler,
-  setCallsUpdateHandler,
+  startSession,
+  stopSession,
+  getSession,
+  isSessionConnected,
   sendMessage,
-  getCurrentUserJid,
-  getProfilePicture,
+  setGlobalMessageHandler,
+  setGlobalQRHandler,
 };

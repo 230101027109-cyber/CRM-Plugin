@@ -1,10 +1,8 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const uuid = require('uuid');
-const { setMessageHandler, setContactUpdateHandler, setQRHandler, getCurrentUserJid } = require('../services/baileysService');
+const { setGlobalMessageHandler, setGlobalQRHandler } = require('../services/baileysService');
 const { saveMessage, markAsRead } = require('../controllers/messageController');
-const { syncContacts } = require('../controllers/contactController');
-const { redisClient } = require('../config/redis');
 
 const initSocket = (server) => {
   const io = new Server(server, {
@@ -16,8 +14,7 @@ const initSocket = (server) => {
 
   const authenticateSocket = (token) => {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      return decoded;
+      return jwt.verify(token, process.env.JWT_SECRET);
     } catch {
       return null;
     }
@@ -32,15 +29,17 @@ const initSocket = (server) => {
   });
 
   io.on('connection', async (socket) => {
-    console.log(`Client connected: ${socket.id}`);
+    console.log(`Client connected: ${socket.id}, Tenant: ${socket.user.tenantId}`);
+    
+    // Join tenant room to receive tenant-specific events
+    socket.join(`tenant:${socket.user.tenantId}`);
 
-    setMessageHandler(async (msg) => {
+    setGlobalMessageHandler(async ({ tenantId, channelId, msg }) => {
       if (!msg?.key) return;
 
       const { remoteJid, id } = msg.key;
       const fromMe = msg.key.fromMe || false;
-      const currentUser = getCurrentUserJid();
-      const actualSender = fromMe ? currentUser : (msg.key?.participant || msg.key?.remoteJid || currentUser || '');
+      const actualSender = msg.key?.participant || msg.key?.remoteJid || '';
       const timestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000) : new Date();
 
       const messageContent = msg.message?.conversation ||
@@ -58,32 +57,44 @@ const initSocket = (server) => {
 
       const saved = await saveMessage({
         messageId: id || uuid.v4(),
+        tenantId,
+        channelId,
         remoteJid: String(remoteJid),
         senderJid: String(actualSender),
         content: messageContent,
         messageType,
         fromMe,
         timestamp,
-        participants: [String(fromMe ? (currentUser || remoteJid) : (msg.key?.participant || remoteJid))],
+        participants: [String(msg.key?.participant || remoteJid)],
       });
 
-      socket.broadcast.emit('new_message', {
+      // Broadcast to all users in this tenant
+      io.to(`tenant:${tenantId}`).emit('new_message', {
         remoteJid: String(remoteJid),
         message: saved,
       });
-
-      socket.emit('new_message', {
-        remoteJid: String(remoteJid),
-        message: saved,
-      });
+      
+      // Trigger Workflow Engine
+      const { processEvent } = require('../services/workflowEngine');
+      
+      // Only process incoming messages (not fromMe) to prevent infinite loops with auto-replies
+      if (!fromMe) {
+        // We'll need the contact to know if it's new, etc.
+        // For simplicity in this demo, let's just trigger 'message_received'
+        await processEvent(tenantId, 'message_received', {
+          tenantId,
+          channelId,
+          remoteJid: String(remoteJid),
+          contactId: null, // Ideally we query or create contact first
+          message: messageContent,
+          isFirstMessage: false // Needs actual check in prod
+        });
+      }
     });
 
-    setContactUpdateHandler(async (updates) => {
-      socket.emit('contacts_updated', updates);
-    });
-
-    setQRHandler(async (qr) => {
-      socket.emit('qr_code', qr);
+    setGlobalQRHandler(async ({ tenantId, channelId, qr }) => {
+      // Send QR only to users of this tenant
+      io.to(`tenant:${tenantId}`).emit('qr_code', qr);
     });
 
     socket.on('join_chat', async (jid) => {
