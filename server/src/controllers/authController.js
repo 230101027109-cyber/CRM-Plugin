@@ -148,14 +148,33 @@ const getProfile = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { firstName, lastName, phone } = req.body;
-    const user = await User.findOneAndUpdate(
-      { userId: req.user.userId },
-      { firstName, lastName, phone },
-      { new: true }
-    ).select('-pin');
+    const { firstName, lastName, phone, currentPin, newPin } = req.body;
+    const user = await User.findOne({ userId: req.user.userId });
     
-    res.json({ success: true, user });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (firstName) user.firstName = firstName;
+    if (lastName) user.lastName = lastName;
+    if (phone) user.phone = phone;
+
+    if (currentPin && newPin) {
+      const isMatch = await bcrypt.compare(currentPin, user.pin);
+      if (!isMatch) {
+        return res.status(400).json({ success: false, message: 'Incorrect current PIN' });
+      }
+      const salt = await bcrypt.genSalt(10);
+      user.pin = await bcrypt.hash(newPin, salt);
+    }
+
+    await user.save();
+    
+    // Return user without pin
+    const userObj = user.toObject();
+    delete userObj.pin;
+    
+    res.json({ success: true, user: userObj });
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ success: false, message: 'Server error updating profile' });
