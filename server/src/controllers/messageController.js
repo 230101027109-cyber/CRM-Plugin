@@ -7,10 +7,9 @@ const getMessages = async (remoteJid, limit = 50, before) => {
 
   const messages = await ChatMessage.find(query)
     .sort({ timestamp: -1 })
-    .limit(limit)
-    .reverse();
+    .limit(limit);
 
-  return messages;
+  return messages.reverse();
 };
 
 const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before) => {
@@ -19,10 +18,9 @@ const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before) => 
 
   const messages = await ChatMessage.find(query)
     .sort({ timestamp: -1 })
-    .limit(limit)
-    .reverse();
+    .limit(limit);
 
-  return messages;
+  return messages.reverse();
 };
 
 const saveMessage = async (data) => {

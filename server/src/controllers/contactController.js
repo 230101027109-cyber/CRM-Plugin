@@ -2,7 +2,7 @@ const Contact = require('../models/Contact');
 const ChatMessage = require('../models/ChatMessage');
 
 const getChatList = async (tenantId) => {
-  const contacts = await Contact.find({ tenantId }, 'jid name phone pushName isGroup lastMessage lastMessageTime isOnline unreadCount profilePicUrl')
+  const contacts = await Contact.find({ tenantId }, 'jid name phone pushName isGroup channelId lastMessage lastMessageTime isOnline unreadCount profilePicUrl')
     .sort({ lastMessageTime: -1 })
     .limit(100);
 
@@ -11,6 +11,7 @@ const getChatList = async (tenantId) => {
     name: contact.name || contact.pushName || contact.phone,
     phone: contact.phone,
     isGroup: contact.isGroup,
+    channelId: contact.channelId,
     isOnline: contact.isOnline,
     lastMessage: contact.lastMessage,
     lastMessageTime: contact.lastMessageTime,
@@ -20,7 +21,7 @@ const getChatList = async (tenantId) => {
 };
 
 const getContacts = async (tenantId) => {
-  return await Contact.find({ tenantId, isGroup: false }, 'jid name phone pushName isBusiness isOnline about profilePicUrl lastSeen tags')
+  return await Contact.find({ tenantId, isGroup: false }, 'jid name phone pushName isBusiness isOnline channelId about profilePicUrl lastSeen tags')
     .sort({ name: 1 })
     .limit(500);
 };

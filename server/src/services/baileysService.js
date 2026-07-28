@@ -41,8 +41,7 @@ const startSession = async (channelId, sessionId, tenantId) => {
     logger: P({ level: 'error' }),
     printQRInTerminal: false,
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
-    syncFullHistory: true,
-    defaultQueryTimeoutMs: 60000,
+    defaultQueryTimeoutMs: undefined,
   });
 
   // Bind store to socket events so contacts/chats populate
@@ -152,7 +151,7 @@ const getQR = (channelId) => {
 
 const sendMessage = async (channelId, jid, content, options = {}) => {
   const sock = sessions.get(channelId);
-  if (!sock || !sock.user) throw new Error('WhatsApp not connected for this channel');
+  if (!sock || !sock.user) return { success: false, error: 'WhatsApp not connected for this channel' };
 
   const messageOptions = {};
   if (options.quotedMessageId) messageOptions.quoted = options.quotedMessageId;
@@ -164,7 +163,7 @@ const sendMessage = async (channelId, jid, content, options = {}) => {
     const result = await sock.sendMessage(jid, { text: content }, messageOptions);
     return { success: true, messageId: result?.key?.id, timestamp: new Date() };
   } catch (error) {
-    console.error(`Error sending message on channel ${channelId}:`, error);
+    console.error(`Error sending message on channel ${channelId}:`, error.message);
     return { success: false, error: error.message };
   }
 };

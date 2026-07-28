@@ -2,6 +2,7 @@ const express = require('express');
 const authenticate = require('../middleware/auth');
 const { getMessagesForTenant, saveMessage } = require('../controllers/messageController');
 const whatsappService = require('../services/baileysService');
+const Contact = require('../models/Contact');
 
 const router = express.Router();
 
@@ -18,9 +19,19 @@ router.get('/:remoteJid', authenticate, async (req, res) => {
 
 router.post('/send', authenticate, async (req, res) => {
   try {
-    const { channelId, remoteJid, content, type = 'text', file, mimetype, caption, fileName, quotedMessageId } = req.body;
-    if (!channelId || !remoteJid || !content) {
-      return res.status(400).json({ success: false, message: 'channelId, remoteJid, and content are required' });
+    let { channelId, remoteJid, content, type = 'text', file, mimetype, caption, fileName, quotedMessageId } = req.body;
+    if (!remoteJid || !content) {
+      return res.status(400).json({ success: false, message: 'remoteJid and content are required' });
+    }
+
+    // If channelId not provided, look it up from the contact
+    if (!channelId) {
+      const contact = await Contact.findOne({ tenantId: req.user.tenantId, jid: remoteJid }).select('channelId');
+      if (contact?.channelId) {
+        channelId = contact.channelId;
+      } else {
+        return res.status(400).json({ success: false, message: 'channelId is required (contact has no channel assigned)' });
+      }
     }
 
     const result = await whatsappService.sendMessage(channelId, remoteJid, content, {
