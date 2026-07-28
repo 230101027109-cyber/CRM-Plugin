@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.get('/chats', authenticate, async (req, res) => {
   try {
-    const chats = await getChatList();
+    const chats = await getChatList(req.user.tenantId);
     res.json({ success: true, data: chats });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -15,7 +15,7 @@ router.get('/chats', authenticate, async (req, res) => {
 
 router.get('/contacts', authenticate, async (req, res) => {
   try {
-    const contacts = await getContacts();
+    const contacts = await getContacts(req.user.tenantId);
     res.json({ success: true, data: contacts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -24,7 +24,7 @@ router.get('/contacts', authenticate, async (req, res) => {
 
 router.get('/groups', authenticate, async (req, res) => {
   try {
-    const groups = await getGroups();
+    const groups = await getGroups(req.user.tenantId);
     res.json({ success: true, data: groups });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -35,7 +35,7 @@ router.get('/search', authenticate, async (req, res) => {
   try {
     const { q } = req.query;
     if (!q) return res.json({ success: true, data: [] });
-    const contacts = await searchContacts(q);
+    const contacts = await searchContacts(q, req.user.tenantId);
     res.json({ success: true, data: contacts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

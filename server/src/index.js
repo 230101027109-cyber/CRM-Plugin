@@ -49,6 +49,27 @@ const startServer = async () => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
+
+  // Reconnect active WhatsApp channels on startup
+  try {
+    const Channel = require('./models/Channel');
+    const whatsappService = require('./services/baileysService');
+    const activeChannels = await Channel.find({ status: { $in: ['connected', 'connecting'] } });
+    console.log(`[Startup] Reconnecting ${activeChannels.length} active channel(s)...`);
+
+    for (const channel of activeChannels) {
+      if (!channel.sessionId) {
+        console.log(`[Startup] Channel ${channel.channelId} has no sessionId, marking disconnected`);
+        channel.status = 'disconnected';
+        await channel.save();
+        continue;
+      }
+      whatsappService.startSession(channel.channelId, channel.sessionId, channel.tenantId)
+        .catch(err => console.error(`[Startup] Failed to reconnect channel ${channel.channelId}:`, err.message));
+    }
+  } catch (err) {
+    console.error('[Startup] Channel reconnection error:', err.message);
+  }
 };
 
 startServer();

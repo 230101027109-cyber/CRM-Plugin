@@ -95,7 +95,7 @@ const ChatWindow = ({ chat, onBack }) => {
     if (!content.trim() || sending) return;
     setSending(true);
     try {
-      await messagesAPI.sendMessage(chat.jid, content, { mediaType: type });
+      await messagesAPI.sendMessage(chat.jid, content, { channelId: chat.channelId, type });
       setMessages(prev => [...prev, {
         remoteJid: chat.jid,
         content,

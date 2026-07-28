@@ -70,15 +70,17 @@ const initSocket = (server) => {
     
     // Trigger Workflow Engine
     const { processEvent } = require('../services/workflowEngine');
+    const Contact = require('../models/Contact');
     
     if (!fromMe) {
+      const contact = await Contact.findOne({ tenantId, jid: String(remoteJid) }).select('_id');
       await processEvent(tenantId, 'message_received', {
         tenantId,
         channelId,
         remoteJid: String(remoteJid),
-        contactId: null,
+        contactId: contact?._id || null,
         message: messageContent,
-        isFirstMessage: false
+        isFirstMessage: !contact
       });
     }
   });

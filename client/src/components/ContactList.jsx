@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Search } from 'lucide-react';
-import axios from 'axios';
+import { Search, UserX, RefreshCw } from 'lucide-react';
+import { contactsAPI, whatsappAPI } from '../services/api';
 
 const ContactList = ({ onSelectContact }) => {
   const [contacts, setContacts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchContacts();
@@ -15,12 +16,25 @@ const ContactList = ({ onSelectContact }) => {
 
   const fetchContacts = async () => {
     try {
-      const res = await axios.get('/api/contacts/contacts');
+      const res = await contactsAPI.getContacts();
       if (res.data.success) setContacts(res.data.data);
     } catch (error) {
       console.error('Error fetching contacts:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await whatsappAPI.sync();
+      await fetchContacts();
+    } catch (error) {
+      console.error('Error syncing contacts:', error);
+      alert('Failed to sync contacts. Make sure WhatsApp is connected.');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -33,7 +47,18 @@ const ContactList = ({ onSelectContact }) => {
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       <div className="p-4 bg-gray-50 border-b">
-        <h1 className="text-xl font-semibold text-gray-800 mb-3">Contacts</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-xl font-semibold text-gray-800">Contacts</h1>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            title="Sync from WhatsApp"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg font-medium transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing...' : 'Sync'}
+          </button>
+        </div>
         <div className="relative">
           <input
             type="text"
@@ -48,6 +73,16 @@ const ContactList = ({ onSelectContact }) => {
       <div className="flex-1 overflow-y-auto chat-scroll">
         {loading ? (
           <div className="p-4 text-center text-gray-400">Loading...</div>
+        ) : filteredContacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+              <UserX size={28} className="text-gray-400" />
+            </div>
+            <p className="text-gray-700 font-medium">No contacts found</p>
+            <p className="text-sm text-gray-400 mt-1">
+              {searchQuery ? 'Try a different search term.' : 'Contacts will appear here once you sync them from WhatsApp.'}
+            </p>
+          </div>
         ) : (
           filteredContacts.map(contact => (
             <div

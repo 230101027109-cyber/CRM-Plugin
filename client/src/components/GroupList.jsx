@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Users } from 'lucide-react';
+import { Users, RefreshCw } from 'lucide-react';
 import moment from 'moment';
-import axios from 'axios';
+import { contactsAPI, whatsappAPI } from '../services/api';
 
 const GroupList = ({ onSelectGroup }) => {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchGroups();
@@ -15,7 +16,7 @@ const GroupList = ({ onSelectGroup }) => {
 
   const fetchGroups = async () => {
     try {
-      const res = await axios.get('/api/contacts/groups');
+      const res = await contactsAPI.getGroups();
       if (res.data.success) setGroups(res.data.data);
     } catch (error) {
       console.error('Error fetching groups:', error);
@@ -24,10 +25,34 @@ const GroupList = ({ onSelectGroup }) => {
     }
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await whatsappAPI.sync();
+      await fetchGroups();
+    } catch (error) {
+      console.error('Error syncing groups:', error);
+      alert('Failed to sync. Make sure WhatsApp is connected.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       <div className="p-4 bg-gray-50 border-b">
-        <h1 className="text-xl font-semibold text-gray-800">Groups</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-gray-800">Groups</h1>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            title="Sync from WhatsApp"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg font-medium transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing...' : 'Sync'}
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto chat-scroll">
         {loading ? (

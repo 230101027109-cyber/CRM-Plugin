@@ -13,13 +13,28 @@ const getMessages = async (remoteJid, limit = 50, before) => {
   return messages;
 };
 
+const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before) => {
+  const query = { tenantId, remoteJid };
+  if (before) query.timestamp = { $lt: new Date(before) };
+
+  const messages = await ChatMessage.find(query)
+    .sort({ timestamp: -1 })
+    .limit(limit)
+    .reverse();
+
+  return messages;
+};
+
 const saveMessage = async (data) => {
   const message = new ChatMessage(data);
   const saved = await message.save();
 
   await Contact.findOneAndUpdate(
-    { jid: data.remoteJid },
+    { tenantId: data.tenantId, jid: data.remoteJid },
     {
+      tenantId: data.tenantId,
+      channelId: data.channelId,
+      jid: data.remoteJid,
       lastMessage: data.content || (data.caption || ''),
       lastMessageTime: data.timestamp || new Date(),
       $inc: data.fromMe ? {} : { unreadCount: 1 },
@@ -46,6 +61,7 @@ const deleteMessage = async (messageId) => {
 
 module.exports = {
   getMessages,
+  getMessagesForTenant,
   saveMessage,
   markAsRead,
   getUnreadCount,

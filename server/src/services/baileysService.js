@@ -1,10 +1,11 @@
-const { makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeInMemoryStore } = require('@whiskeysockets/baileys');
 const P = require('pino');
 const fs = require('fs');
 const path = require('path');
 const Channel = require('../models/Channel');
 
 const sessions = new Map(); // Map to store multiple socket instances by channelId
+const stores = new Map(); // Map to store in-memory stores by channelId
 const qrs = new Map(); // Store latest QR codes by channelId
 const sessionHandlers = new Map(); // Handlers per channel
 
@@ -30,13 +31,22 @@ const startSession = async (channelId, sessionId, tenantId) => {
   const { state, saveCreds } = await useMultiFileAuthState(dir);
   const { version } = await fetchLatestBaileysVersion();
 
+  // In-memory store to track chats/contacts for sync
+  const store = makeInMemoryStore({ logger: P({ level: 'error' }).child({ level: 'error' }) });
+  stores.set(channelId, store);
+
   const sock = makeWASocket({
     version,
     auth: state,
     logger: P({ level: 'error' }),
     printQRInTerminal: false,
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
+    syncFullHistory: true,
+    defaultQueryTimeoutMs: 60000,
   });
+
+  // Bind store to socket events so contacts/chats populate
+  store.bind(sock.ev);
 
   sessions.set(channelId, sock);
 
@@ -61,11 +71,13 @@ const startSession = async (channelId, sessionId, tenantId) => {
       console.log(`[Baileys] Should reconnect: ${shouldReconnect}`);
       if (shouldReconnect) {
         sessions.delete(channelId);
+        stores.delete(channelId);
         setTimeout(() => {
           startSession(channelId, sessionId, tenantId);
         }, 2000); // Add a 2s delay to prevent tight infinite loop
       } else {
         sessions.delete(channelId);
+        stores.delete(channelId);
         // Clear session folder
         if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
         // Update DB
@@ -79,11 +91,27 @@ const startSession = async (channelId, sessionId, tenantId) => {
         status: 'connected', 
         connectedNumber: userJid.split(':')[0] 
       });
-      // Try sync contacts (using the new channel-aware logic later)
+      // Contacts sync is triggered manually via the Sync button in the UI
     }
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
+    console.log(`[Baileys] History set: ${chats.length} chats, ${contacts.length} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
+
+    // Auto-sync contacts to DB when full history is loaded
+    if (isLatest && chats.length > 0) {
+      try {
+        const { syncContacts } = require('../controllers/contactController');
+        const store = stores.get(channelId);
+        const result = await syncContacts(sock, store, tenantId, channelId);
+        console.log(`[Baileys] Auto-synced after history: ${JSON.stringify(result)}`);
+      } catch (err) {
+        console.error('[Baileys] Auto-sync after history failed:', err.message);
+      }
+    }
+  });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify' || !globalMessageHandler) return;
@@ -100,12 +128,17 @@ const stopSession = async (channelId) => {
   if (sock) {
     await sock.logout();
     sessions.delete(channelId);
+    stores.delete(channelId);
     qrs.delete(channelId);
   }
 };
 
 const getSession = (channelId) => {
   return sessions.get(channelId);
+};
+
+const getStore = (channelId) => {
+  return stores.get(channelId);
 };
 
 const isSessionConnected = (channelId) => {
@@ -140,6 +173,7 @@ module.exports = {
   startSession,
   stopSession,
   getSession,
+  getStore,
   isSessionConnected,
   getQR,
   sendMessage,
