@@ -8,6 +8,7 @@ const sessions = new Map(); // Map to store multiple socket instances by channel
 const stores = new Map(); // Map to store in-memory stores by channelId
 const qrs = new Map(); // Store latest QR codes by channelId
 const sessionHandlers = new Map(); // Handlers per channel
+const jidAliases = new Map(); // Map<channelId, Map<lidJid, phoneJid>>
 
 const sessionPath = path.resolve(process.env.STORE_PATH || path.join(__dirname, '../../data/baileys'));
 
@@ -34,6 +35,7 @@ const startSession = async (channelId, sessionId, tenantId) => {
   // In-memory store to track chats/contacts for sync
   const store = makeInMemoryStore({ logger: P({ level: 'error' }).child({ level: 'error' }) });
   stores.set(channelId, store);
+  jidAliases.set(channelId, new Map());
 
   const sock = makeWASocket({
     version,
@@ -73,12 +75,14 @@ const startSession = async (channelId, sessionId, tenantId) => {
         if (shouldReconnect) {
           sessions.delete(channelId);
           stores.delete(channelId);
+          jidAliases.delete(channelId);
           setTimeout(() => {
             startSession(channelId, sessionId, tenantId);
           }, 2000);
         } else {
           sessions.delete(channelId);
           stores.delete(channelId);
+          jidAliases.delete(channelId);
           // Clear session folder
           if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
           // Update DB
@@ -105,6 +109,20 @@ const startSession = async (channelId, sessionId, tenantId) => {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // WhatsApp can send incoming messages using a private @lid JID even when
+  // the user is already known by phone number. Consolidate both identities.
+  sock.ev.on('chats.phoneNumberShare', async ({ lid, jid }) => {
+    if (!lid || !jid) return;
+    jidAliases.get(channelId)?.set(lid, jid);
+    console.log(`[Baileys] Linked WhatsApp LID ${lid} to ${jid} on channel ${channelId}`);
+    try {
+      const { mergeContactIdentity } = require('../controllers/contactController');
+      await mergeContactIdentity({ tenantId, channelId, lid, jid });
+    } catch (error) {
+      console.error(`[Baileys] Could not merge LID ${lid}:`, error.message);
+    }
+  });
 
   sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
     console.log(`[Baileys] History set: ${chats.length} chats, ${contacts.length} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
@@ -150,6 +168,7 @@ const stopSession = async (channelId) => {
     await sock.logout();
     sessions.delete(channelId);
     stores.delete(channelId);
+    jidAliases.delete(channelId);
     qrs.delete(channelId);
   }
 };
@@ -169,6 +188,10 @@ const isSessionConnected = (channelId) => {
 
 const getQR = (channelId) => {
   return qrs.get(channelId) || null;
+};
+
+const getCanonicalJid = (channelId, jid) => {
+  return jidAliases.get(channelId)?.get(jid) || jid;
 };
 
 const sendMessage = async (channelId, jid, content, options = {}) => {
@@ -197,6 +220,7 @@ module.exports = {
   getStore,
   isSessionConnected,
   getQR,
+  getCanonicalJid,
   sendMessage,
   setGlobalMessageHandler,
   setGlobalQRHandler,

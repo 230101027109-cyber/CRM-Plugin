@@ -120,7 +120,9 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
   if (store && store.contacts) {
     const contactEntries = typeof store.contacts.toJSON === 'function'
       ? Object.values(store.contacts.toJSON())
-      : Array.from(store.contacts.values());
+      : store.contacts instanceof Map
+        ? Array.from(store.contacts.values())
+        : Object.values(store.contacts);
     console.log(`[Sync] Store contacts has ${contactEntries.length} entries`);
 
     for (const contact of contactEntries) {
@@ -195,6 +197,46 @@ const createOrUpdateContact = async (tenantId, data) => {
   );
 };
 
+const mergeContactIdentity = async ({ tenantId, channelId, lid, jid }) => {
+  if (!lid || !jid || lid === jid) return jid;
+
+  // Move messages first. A message id stays unchanged, so this does not
+  // duplicate messages and makes the normal phone chat show its history.
+  await ChatMessage.updateMany(
+    { tenantId, channelId, remoteJid: lid },
+    { $set: { remoteJid: jid } }
+  );
+
+  const phone = jid.split('@')[0].split(':')[0];
+  const [phoneContact, lidContact] = await Promise.all([
+    Contact.findOne({ tenantId, jid }),
+    Contact.findOne({ tenantId, jid: lid }),
+  ]);
+
+  if (phoneContact) {
+    await Contact.updateOne(
+      { _id: phoneContact._id },
+      { $addToSet: { aliases: lid }, $set: { channelId, phone } }
+    );
+    if (lidContact && String(lidContact._id) !== String(phoneContact._id)) {
+      await Contact.deleteOne({ _id: lidContact._id });
+    }
+  } else if (lidContact) {
+    await Contact.updateOne(
+      { _id: lidContact._id },
+      { $set: { jid, phone, channelId }, $addToSet: { aliases: lid } }
+    );
+  } else {
+    await Contact.findOneAndUpdate(
+      { tenantId, jid },
+      { $setOnInsert: { tenantId, channelId, jid, phone, isGroup: false }, $addToSet: { aliases: lid } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  }
+
+  return jid;
+};
+
 const addContactTag = async (tenantId, jid, tag) => {
   return await Contact.findOneAndUpdate(
     { tenantId, jid },
@@ -230,6 +272,7 @@ module.exports = {
   getGroups,
   syncContacts,
   createOrUpdateContact,
+  mergeContactIdentity,
   addContactTag,
   updateContactNotes,
   searchContacts,

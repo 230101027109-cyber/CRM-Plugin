@@ -4,6 +4,9 @@ const contactSchema = new mongoose.Schema({
   tenantId: { type: String, required: true, index: true },
   channelId: { type: String, required: true, index: true },
   jid: { type: String, required: true, index: true },
+  // WhatsApp may use a private LID JID for inbound messages. Keep those
+  // aliases on the phone-number contact so one person never becomes two chats.
+  aliases: [{ type: String }],
   name: { type: String, default: '' },
   phone: { type: String, default: '' },
   pushName: { type: String, default: '' },

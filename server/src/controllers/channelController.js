@@ -16,12 +16,9 @@ const reconcileChannelStatus = async (channel) => {
     channel.status = 'disconnected';
     await channel.save();
   }
-  // Socket says disconnected but DB says connecting (stale) → fix DB
-  else if (!sessionConnected && channel.status === 'connecting') {
-    console.log(`[Channel] Reconciling channel ${channel.channelId}: socket disconnected, DB was 'connecting' → fixing to 'disconnected'`);
-    channel.status = 'disconnected';
-    await channel.save();
-  }
+  // Do not turn `connecting` into `disconnected` here. A Baileys socket has
+  // no `user` until the QR is scanned, so this check cancelled normal QR
+  // startup before the QR could be displayed.
   
   return channel;
 };

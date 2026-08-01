@@ -1,8 +1,9 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const uuid = require('uuid');
-const { setGlobalMessageHandler, setGlobalQRHandler } = require('../services/baileysService');
+const { setGlobalMessageHandler, setGlobalQRHandler, getCanonicalJid } = require('../services/baileysService');
 const { saveMessage, markAsRead } = require('../controllers/messageController');
+const Contact = require('../models/Contact');
 
 const initSocket = (server) => {
   const io = new Server(server, {
@@ -31,7 +32,13 @@ const initSocket = (server) => {
   setGlobalMessageHandler(async ({ tenantId, channelId, msg }) => {
     if (!msg?.key) return;
 
-    const { remoteJid, id } = msg.key;
+    const { remoteJid: rawRemoteJid, id } = msg.key;
+    let remoteJid = getCanonicalJid(channelId, String(rawRemoteJid));
+    // Preserve a LID mapping learned before a server restart.
+    if (remoteJid.endsWith('@lid')) {
+      const knownContact = await Contact.findOne({ tenantId, aliases: remoteJid }).select('jid');
+      if (knownContact?.jid) remoteJid = knownContact.jid;
+    }
     const fromMe = msg.key.fromMe || false;
     const actualSender = msg.key?.participant || msg.key?.remoteJid || '';
     const timestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000) : new Date();
@@ -76,8 +83,6 @@ const initSocket = (server) => {
     
     // Trigger Workflow Engine
     const { processEvent } = require('../services/workflowEngine');
-    const Contact = require('../models/Contact');
-    
       if (!fromMe && result.created) {
         const contact = await Contact.findOne({ tenantId, jid: String(remoteJid) }).select('_id');
         await processEvent(tenantId, 'message_received', {
