@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Chats from './pages/Chats';
 import Contacts from './pages/Contacts';
+import Groups from './pages/Groups';
 import Channels from './pages/Channels';
 import ChannelDetail from './pages/ChannelDetail';
 import Tickets from './pages/Tickets';
@@ -28,6 +29,7 @@ const App = () => {
       <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
         <Route path="/chats" element={<Chats />} />
         <Route path="/contacts" element={<Contacts />} />
+        <Route path="/groups" element={<Groups />} />
         <Route path="/channels" element={<Channels />} />
         <Route path="/channels/:id" element={<ChannelDetail />} />
         <Route path="/tickets" element={<Tickets />} />

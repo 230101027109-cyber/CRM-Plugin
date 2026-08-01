@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { 
   MessageSquare, 
   Users, 
+  Users2 as GroupIcon,
   Radio, 
   Ticket, 
   Workflow, 
@@ -21,6 +22,7 @@ const DashboardLayout = () => {
   const navItems = [
     { path: '/chats', icon: MessageSquare, label: 'Conversations' },
     { path: '/contacts', icon: Users, label: 'Contacts' },
+    { path: '/groups', icon: GroupIcon, label: 'Groups' },
     { path: '/channels', icon: Radio, label: 'Channels' },
     { path: '/tickets', icon: Ticket, label: 'Tickets' },
     { path: '/workflows', icon: Workflow, label: 'Workflows' },

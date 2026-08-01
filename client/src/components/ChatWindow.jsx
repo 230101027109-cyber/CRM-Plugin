@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { contactsAPI, messagesAPI } from '../services/api';
+import { messagesAPI } from '../services/api';
 import { useSocket } from '../hooks/useSocket.jsx';
 import moment from 'moment';
-import { Send, Phone, Search, Smile, Paperclip, MoreVertical, ArrowLeft } from 'lucide-react';
+import { Send, Phone, Search, Smile, Paperclip, MoreVertical, ArrowLeft, Check, CheckCheck } from 'lucide-react';
 
 const MessageInput = ({ remoteJid, onSend }) => {
   const [message, setMessage] = useState('');
@@ -50,29 +50,32 @@ const MessageInput = ({ remoteJid, onSend }) => {
 const ChatWindow = ({ chat, onBack }) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [initialScrollDone, setInitialScrollDone] = useState(false);
   const messagesEndRef = useRef(null);
+  const seenIdsRef = useRef(new Set());
   const { newMessages, joinChat, leaveChat } = useSocket();
 
+  // Fetch messages on chat change
   useEffect(() => {
     if (!chat) return;
+    seenIdsRef.current = new Set();
+    setInitialScrollDone(false);
+    setLoading(true);
     fetchMessages();
     joinChat(chat.jid);
     return () => leaveChat(chat.jid);
-  }, [chat]);
-
-  useEffect(() => {
-    const incoming = newMessages?.[chat?.jid] || [];
-    if (incoming.length > 0) {
-      setMessages(prev => [...prev, incoming[incoming.length - 1]]);
-    }
-  }, [newMessages]);
+  }, [chat?.jid]);
 
   const fetchMessages = async () => {
     try {
       const res = await messagesAPI.getMessages(chat.jid, 50);
-      if (res.data.success) setMessages(res.data.data || []);
+      if (res.data.success) {
+        const msgs = res.data.data || [];
+        // Populate seen IDs from fetched messages
+        msgs.forEach(m => { if (m.messageId) seenIdsRef.current.add(m.messageId); });
+        setMessages(msgs);
+      }
     } catch (error) {
       console.error('Error fetching messages:', error);
     } finally {
@@ -80,42 +83,99 @@ const ChatWindow = ({ chat, onBack }) => {
     }
   };
 
+  // Handle real-time incoming messages from socket with dedup
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const incoming = newMessages?.[chat?.jid] || [];
+    if (incoming.length === 0) return;
+
+    setMessages(prev => {
+      const updated = [...prev];
+      let changed = false;
+
+      for (const msg of incoming) {
+        // Dedup: skip if we've already seen this messageId
+        if (msg.messageId && seenIdsRef.current.has(msg.messageId)) continue;
+        if (msg.messageId) seenIdsRef.current.add(msg.messageId);
+
+        // Try to replace optimistic message (local temp ID) with server version
+        const optimisticIdx = updated.findIndex(m =>
+          !m.messageId?.startsWith('BAILEYS') &&
+          m.content === msg.content &&
+          m.fromMe === true &&
+          Math.abs(new Date(m.timestamp) - new Date(msg.timestamp)) < 3000
+        );
+
+        if (optimisticIdx !== -1) {
+          updated[optimisticIdx] = msg;
+        } else {
+          updated.push(msg);
+        }
+        changed = true;
+      }
+
+      return changed ? updated : prev;
+    });
+  }, [newMessages]);
+
+  // Instant scroll to bottom on initial message load
+  useEffect(() => {
+    if (!initialScrollDone && messages.length > 0 && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+      setInitialScrollDone(true);
     }
-  }, [messages]);
+  }, [messages, initialScrollDone]);
+
+  // Smooth auto-scroll for new messages only if user is near bottom
+  const isNearBottom = useCallback(() => {
+    const el = messagesEndRef.current?.parentElement;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+  }, []);
 
   useEffect(() => {
-    const interval = setInterval(fetchMessages, 5000);
-    return () => clearInterval(interval);
-  }, [chat]);
+    if (initialScrollDone && isNearBottom() && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, initialScrollDone, isNearBottom]);
 
   const handleSendMessage = async (content, type = 'text') => {
     if (!content.trim() || sending) return;
     setSending(true);
+
+    const optimisticId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    seenIdsRef.current.add(optimisticId);
+
+    const optimisticMsg = {
+      remoteJid: chat.jid,
+      content,
+      messageType: type,
+      fromMe: true,
+      timestamp: new Date().toISOString(),
+      messageId: optimisticId,
+      _optimistic: true,
+    };
+
+    setMessages(prev => [...prev, optimisticMsg]);
+
     try {
-      await messagesAPI.sendMessage(chat.jid, content, { channelId: chat.channelId, type });
-      setMessages(prev => [...prev, {
-        remoteJid: chat.jid,
-        content,
-        messageType: type,
-        fromMe: true,
-        timestamp: new Date(),
-        messageId: Date.now().toString(),
-      }]);
+      const res = await messagesAPI.sendMessage(chat.jid, content, { channelId: chat.channelId, type });
+      if (res.data.success && res.data.messageId) {
+        // Replace optimistic with server-confirmed message
+        seenIdsRef.current.add(res.data.messageId);
+        setMessages(prev => prev.map(m =>
+          m.messageId === optimisticId
+            ? { ...m, messageId: res.data.messageId, _optimistic: false }
+            : m
+        ));
+      }
     } catch (error) {
       console.error('Error sending message:', error);
+      // Mark the optimistic message as failed
+      setMessages(prev => prev.map(m =>
+        m.messageId === optimisticId ? { ...m, _failed: true } : m
+      ));
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage(newMessage);
-      setNewMessage('');
     }
   };
 
@@ -163,28 +223,51 @@ const ChatWindow = ({ chat, onBack }) => {
         ) : messages.length === 0 ? (
           <div className="text-center text-gray-400 mt-10">No messages yet. Start the conversation!</div>
         ) : (
-          messages.map((msg, idx) => (
-            <div key={msg.messageId || idx} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} mb-2`}>
-              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                msg.fromMe
-                  ? 'bg-green-600 text-white rounded-br-none'
-                  : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
-              }`}>
-                {msg.messageType === 'text' && (
-                  <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
-                )}
-                {msg.messageType !== 'text' && (
-                  <div className="text-sm flex items-center gap-1">
-                    <Paperclip size={14} />
-                    <span>{msg.messageType}</span>
+          messages.map((msg, idx) => {
+            const showDate = idx === 0 || !moment(msg.timestamp).isSame(moment(messages[idx-1]?.timestamp), 'day');
+            return (
+              <React.Fragment key={msg.messageId || `msg_${idx}`}>
+                {showDate && (
+                  <div className="flex justify-center my-3">
+                    <span className="text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded-full">
+                      {moment(msg.timestamp).format('MMM D, YYYY')}
+                    </span>
                   </div>
                 )}
-                <p className={`text-xs mt-1 ${msg.fromMe ? 'text-green-100' : 'text-gray-400'}`}>
-                  {moment(msg.timestamp).format('HH:mm')}
-                </p>
-              </div>
-            </div>
-          ))
+                <div className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} mb-1.5 ${msg._failed ? 'opacity-70' : ''}`}>
+                  <div className={`max-w-xs lg:max-w-md px-3.5 py-2 rounded-xl ${
+                    msg.fromMe
+                      ? 'bg-green-600 text-white rounded-br-sm'
+                      : 'bg-white text-gray-800 rounded-bl-sm border border-gray-200'
+                  }`}>
+                    {msg.messageType === 'text' && (
+                      <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
+                    )}
+                    {msg.messageType !== 'text' && (
+                      <div className="text-sm flex items-center gap-1.5">
+                        <Paperclip size={14} />
+                        <span className="capitalize">{msg.messageType}</span>
+                      </div>
+                    )}
+                    <div className={`flex items-center justify-end gap-1 mt-1 ${msg.fromMe ? 'text-green-100' : 'text-gray-400'}`}>
+                      <span className="text-[10px] leading-none">
+                        {moment(msg.timestamp).format('HH:mm')}
+                      </span>
+                      {msg.fromMe && (
+                        msg._failed ? (
+                          <span className="text-red-300" title="Failed to send">!</span>
+                        ) : msg._optimistic ? (
+                          <Check size={12} className="text-green-200" />
+                        ) : (
+                          <CheckCheck size={12} className="text-green-200" />
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

@@ -35,9 +35,6 @@ export const authAPI = {
 
 export const whatsappAPI = {
   getStatus: () => api.get('/whatsapp/status'),
-  getQR: () => api.get('/whatsapp/qr'),
-  connect: () => api.post('/whatsapp/connect'),
-  disconnect: () => api.post('/whatsapp/disconnect'),
   sync: () => api.post('/whatsapp/sync'),
 };
 

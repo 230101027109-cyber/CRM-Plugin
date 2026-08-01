@@ -24,8 +24,30 @@ const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before) => 
 };
 
 const saveMessage = async (data) => {
-  const message = new ChatMessage(data);
-  const saved = await message.save();
+  const filter = {
+    tenantId: data.tenantId,
+    channelId: data.channelId,
+    messageId: data.messageId,
+  };
+
+  // Baileys can deliver the same event through history, append and notify.
+  // Upsert it once so a replay never prevents the socket event from reaching
+  // the CRM UI.
+  const existing = await ChatMessage.findOne(filter);
+  if (existing) return { message: existing, created: false };
+
+  let saved;
+  try {
+    saved = await ChatMessage.create(data);
+  } catch (error) {
+    // Concurrent notify/append handlers may race between the read above and
+    // the insert. The unique index is the final idempotency guard.
+    if (error.code === 11000) {
+      const duplicate = await ChatMessage.findOne(filter);
+      if (duplicate) return { message: duplicate, created: false };
+    }
+    throw error;
+  }
 
   await Contact.findOneAndUpdate(
     { tenantId: data.tenantId, jid: data.remoteJid },
@@ -35,21 +57,21 @@ const saveMessage = async (data) => {
       jid: data.remoteJid,
       lastMessage: data.content || (data.caption || ''),
       lastMessageTime: data.timestamp || new Date(),
-      $inc: data.fromMe ? {} : { unreadCount: 1 },
+      ...(data.fromMe ? {} : { $inc: { unreadCount: 1 } }),
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  return saved;
+  return { message: saved, created: true };
 };
 
-const markAsRead = async (remoteJid) => {
-  await ChatMessage.updateMany({ remoteJid, read: false }, { read: true, updatedAt: new Date() });
-  await Contact.findOneAndUpdate({ jid: remoteJid }, { unreadCount: 0 });
+const markAsRead = async (tenantId, remoteJid) => {
+  await ChatMessage.updateMany({ tenantId, remoteJid, read: false }, { read: true, updatedAt: new Date() });
+  await Contact.findOneAndUpdate({ tenantId, jid: remoteJid }, { unreadCount: 0 });
 };
 
-const getUnreadCount = async (remoteJid) => {
-  const count = await ChatMessage.countDocuments({ remoteJid, read: false });
+const getUnreadCount = async (tenantId, remoteJid) => {
+  const count = await ChatMessage.countDocuments({ tenantId, remoteJid, read: false });
   return count;
 };
 

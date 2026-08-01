@@ -116,12 +116,41 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
     console.log('[Sync] No store or store.chats available');
   }
 
-  // 3. Sync contacts from sock.contacts if available
+  // 3. Sync contacts from the in-memory store's contact list (most reliable for names)
+  if (store && store.contacts) {
+    const contactEntries = typeof store.contacts.toJSON === 'function'
+      ? Object.values(store.contacts.toJSON())
+      : Array.from(store.contacts.values());
+    console.log(`[Sync] Store contacts has ${contactEntries.length} entries`);
+
+    for (const contact of contactEntries) {
+      const jid = contact.id || contact.jid;
+      if (!jid || jid.includes('@g.us')) continue;
+      const phone = jid.split('@')[0].split(':')[0];
+      await upsertContact(
+        { tenantId, jid },
+        {
+          tenantId,
+          channelId,
+          jid,
+          phone,
+          name: contact.name || contact.notify || contact.pushName || phone,
+          pushName: contact.notify || contact.name || contact.pushName || phone,
+          isBusiness: Boolean(contact.isBusiness),
+          profilePicUrl: contact.imgUrl || contact.profilePicUrl || '',
+        }
+      );
+    }
+  } else {
+    console.log('[Sync] Store contacts not available');
+  }
+
+  // 4. Sync contacts from sock.contacts if available (fallback for any extra data)
   if (sock.contacts) {
     const contactsMap = sock.contacts instanceof Map
       ? Array.from(sock.contacts.entries())
       : Object.entries(sock.contacts);
-    console.log(`[Sync] sock.contacts has ${contactsMap.length} entries`);
+    console.log(`[Sync] sock.contacts has ${contactsMap.length} entries (fallback)`);
 
     for (const [jid, contact] of contactsMap) {
       if (!jid || jid.includes('@g.us')) continue;
@@ -133,40 +162,50 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
           channelId,
           jid,
           phone,
-          name: contact.name || contact.notify || '',
-          pushName: contact.notify || contact.name || '',
+          name: contact.name || contact.notify || phone,
+          pushName: contact.notify || contact.name || phone,
           isBusiness: contact.isBusiness || false,
           profilePicUrl: contact.imgUrl || '',
         }
       );
     }
   } else {
-    console.log('[Sync] sock.contacts not available');
+    console.log('[Sync] sock.contacts not available (fallback skipped)');
   }
 
   console.log(`[Sync] Synced ${syncedCount} contacts/groups (${errorCount} errors) for tenant ${tenantId}, channel ${channelId}`);
   return { synced: syncedCount, errors: errorCount };
 };
 
-const createOrUpdateContact = async (data) => {
+const createOrUpdateContact = async (tenantId, data) => {
+  const phone = String(data.phone || '').replace(/\D/g, '');
+  if (!phone) throw new Error('A valid phone number is required');
+  const jid = data.jid || `${phone}@s.whatsapp.net`;
+
   return await Contact.findOneAndUpdate(
-    { $or: [{ jid: data.jid }, { phone: data.phone }] },
-    data,
+    { tenantId, $or: [{ jid }, { phone }] },
+    {
+      ...data,
+      tenantId,
+      jid,
+      phone,
+      isGroup: false,
+    },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 };
 
-const addContactTag = async (jid, tag) => {
+const addContactTag = async (tenantId, jid, tag) => {
   return await Contact.findOneAndUpdate(
-    { jid },
+    { tenantId, jid },
     { $addToSet: { tags: tag } },
     { new: true }
   );
 };
 
-const updateContactNotes = async (jid, notes) => {
+const updateContactNotes = async (tenantId, jid, notes) => {
   return await Contact.findOneAndUpdate(
-    { jid },
+    { tenantId, jid },
     { notes },
     { new: true }
   );

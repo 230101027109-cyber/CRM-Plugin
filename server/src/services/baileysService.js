@@ -68,28 +68,38 @@ const startSession = async (channelId, sessionId, tenantId) => {
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log(`[Baileys] Connection closed. Status code: ${statusCode}. Error:`, lastDisconnect?.error);
       console.log(`[Baileys] Should reconnect: ${shouldReconnect}`);
-      if (shouldReconnect) {
-        sessions.delete(channelId);
-        stores.delete(channelId);
-        setTimeout(() => {
-          startSession(channelId, sessionId, tenantId);
-        }, 2000); // Add a 2s delay to prevent tight infinite loop
-      } else {
-        sessions.delete(channelId);
-        stores.delete(channelId);
-        // Clear session folder
-        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-        // Update DB
-        await Channel.updateOne({ channelId }, { status: 'disconnected', connectedNumber: null });
+      
+      try {
+        if (shouldReconnect) {
+          sessions.delete(channelId);
+          stores.delete(channelId);
+          setTimeout(() => {
+            startSession(channelId, sessionId, tenantId);
+          }, 2000);
+        } else {
+          sessions.delete(channelId);
+          stores.delete(channelId);
+          // Clear session folder
+          if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+          // Update DB
+          await Channel.updateOne({ channelId }, { status: 'disconnected', connectedNumber: null });
+        }
+      } catch (err) {
+        console.error(`[Baileys] Error handling close for channel ${channelId}:`, err.message);
       }
     } else if (connection === 'open') {
       qrs.delete(channelId);
       console.log(`[Baileys] Connection OPEN for channel ${channelId}`);
-      const userJid = sock.user?.wid || sock.user?.id || '';
-      await Channel.updateOne({ channelId }, { 
-        status: 'connected', 
-        connectedNumber: userJid.split(':')[0] 
-      });
+      try {
+        const userJid = sock.user?.wid || sock.user?.id || '';
+        await Channel.updateOne({ channelId }, { 
+          status: 'connected', 
+          connectedNumber: userJid.split(':')[0] 
+        });
+        console.log(`[Baileys] Channel ${channelId} status updated to 'connected' in DB`);
+      } catch (err) {
+        console.error(`[Baileys] Failed to update channel ${channelId} status in DB:`, err.message);
+      }
       // Contacts sync is triggered manually via the Sync button in the UI
     }
   });
@@ -98,6 +108,14 @@ const startSession = async (channelId, sessionId, tenantId) => {
 
   sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
     console.log(`[Baileys] History set: ${chats.length} chats, ${contacts.length} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
+
+    // Persist history too. Without this, contact sync succeeds but the CRM
+    // chat window is empty until a brand-new message arrives.
+    if (globalMessageHandler && Array.isArray(messages)) {
+      for (const msg of messages) {
+        await globalMessageHandler({ tenantId, channelId, msg });
+      }
+    }
 
     // Auto-sync contacts to DB when full history is loaded
     if (isLatest && chats.length > 0) {
@@ -113,9 +131,13 @@ const startSession = async (channelId, sessionId, tenantId) => {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify' || !globalMessageHandler) return;
+    if (!['notify', 'append'].includes(type) || !globalMessageHandler) return;
     for (const msg of messages) {
-      await globalMessageHandler({ tenantId, channelId, msg });
+      try {
+        await globalMessageHandler({ tenantId, channelId, msg });
+      } catch (error) {
+        console.error(`[Baileys] Failed to handle ${type} message for ${channelId}:`, error.message);
+      }
     }
   });
 

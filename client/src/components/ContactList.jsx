@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, UserX, RefreshCw } from 'lucide-react';
+import { Search, UserX, RefreshCw, Plus, X } from 'lucide-react';
 import { contactsAPI, whatsappAPI } from '../services/api';
 
 const ContactList = ({ onSelectContact }) => {
@@ -7,6 +7,10 @@ const ContactList = ({ onSelectContact }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newContact, setNewContact] = useState({ name: '', phone: '' });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => {
     fetchContacts();
@@ -38,6 +42,24 @@ const ContactList = ({ onSelectContact }) => {
     }
   };
 
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    setCreating(true);
+    setCreateError('');
+    try {
+      const res = await contactsAPI.update(newContact);
+      if (!res.data.success) throw new Error(res.data.message || 'Could not create contact');
+      setShowCreate(false);
+      setNewContact({ name: '', phone: '' });
+      await fetchContacts();
+      onSelectContact(res.data.data);
+    } catch (error) {
+      setCreateError(error.response?.data?.message || error.message || 'Could not create contact');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const filteredContacts = contacts.filter(c =>
     (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (c.phone || '').includes(searchQuery) ||
@@ -49,15 +71,24 @@ const ContactList = ({ onSelectContact }) => {
       <div className="p-4 bg-gray-50 border-b">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold text-gray-800">Contacts</h1>
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            title="Sync from WhatsApp"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg font-medium transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing...' : 'Sync'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setCreateError(''); setShowCreate(true); }}
+              title="Create contact"
+              className="p-1.5 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
+            >
+              <Plus size={16} />
+            </button>
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              title="Sync from WhatsApp"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg font-medium transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+          </div>
         </div>
         <div className="relative">
           <input
@@ -70,6 +101,31 @@ const ContactList = ({ onSelectContact }) => {
           <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
         </div>
       </div>
+      {showCreate && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <form onSubmit={handleCreate} className="w-full max-w-sm rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <h2 className="font-semibold text-gray-900">Create contact</h2>
+              <button type="button" onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+            <div className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
+                <input required value={newContact.name} onChange={e => setNewContact(prev => ({ ...prev, name: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none" placeholder="Contact name" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">WhatsApp number</label>
+                <input required inputMode="tel" value={newContact.phone} onChange={e => setNewContact(prev => ({ ...prev, phone: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none" placeholder="e.g. 919876543210" />
+              </div>
+              {createError && <p className="text-sm text-red-600">{createError}</p>}
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+              <button disabled={creating} type="submit" className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:bg-gray-300">{creating ? 'Creating...' : 'Create contact'}</button>
+            </div>
+          </form>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto chat-scroll">
         {loading ? (
           <div className="p-4 text-center text-gray-400">Loading...</div>

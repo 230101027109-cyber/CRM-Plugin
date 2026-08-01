@@ -1,9 +1,36 @@
 const Channel = require('../models/Channel');
 const whatsappService = require('../services/baileysService');
 
+const reconcileChannelStatus = async (channel) => {
+  const sessionConnected = whatsappService.isSessionConnected(channel.channelId);
+  
+  // Socket says connected but DB says otherwise → fix DB
+  if (sessionConnected && channel.status !== 'connected') {
+    console.log(`[Channel] Reconciling channel ${channel.channelId}: socket connected, DB was '${channel.status}' → fixing to 'connected'`);
+    channel.status = 'connected';
+    await channel.save();
+  }
+  // Socket says disconnected but DB says connected → fix DB
+  else if (!sessionConnected && channel.status === 'connected') {
+    console.log(`[Channel] Reconciling channel ${channel.channelId}: socket disconnected, DB was 'connected' → fixing to 'disconnected'`);
+    channel.status = 'disconnected';
+    await channel.save();
+  }
+  // Socket says disconnected but DB says connecting (stale) → fix DB
+  else if (!sessionConnected && channel.status === 'connecting') {
+    console.log(`[Channel] Reconciling channel ${channel.channelId}: socket disconnected, DB was 'connecting' → fixing to 'disconnected'`);
+    channel.status = 'disconnected';
+    await channel.save();
+  }
+  
+  return channel;
+};
+
 const getChannels = async (req, res) => {
   try {
-    const channels = await Channel.find({ tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
+    let channels = await Channel.find({ tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
+    // Reconcile each channel's status with actual socket state
+    channels = await Promise.all(channels.map(ch => reconcileChannelStatus(ch)));
     res.json({ success: true, data: channels });
   } catch (error) {
     console.error('Error fetching channels:', error);
@@ -13,8 +40,9 @@ const getChannels = async (req, res) => {
 
 const getChannelById = async (req, res) => {
   try {
-    const channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
+    let channel = await Channel.findOne({ _id: req.params.id, tenantId: req.user.tenantId }).populate('assignedTo', 'firstName lastName');
     if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
+    channel = await reconcileChannelStatus(channel);
     res.json({ success: true, data: channel });
   } catch (error) {
     console.error('Error fetching channel by id:', error);

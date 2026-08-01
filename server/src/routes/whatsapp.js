@@ -77,16 +77,15 @@ router.post('/sync', async (req, res) => {
     if (channels.length === 0) {
       return res.json({ success: false, message: 'No connected channels' });
     }
-    const channel = channels[0];
-    console.log('[Sync Route] Channel:', channel.channelId, 'DB status:', channel.status);
-    const sock = whatsappService.getSession(channel.channelId);
-    console.log('[Sync Route] Socket found:', !!sock, 'Socket user:', !!sock?.user);
-    if (!sock) return res.json({ success: false, message: 'WhatsApp session not active' });
-    const store = whatsappService.getStore(channel.channelId);
-    console.log('[Sync Route] Store found:', !!store, 'Store chats size:', store?.chats?.size || 0);
-    const result = await syncContacts(sock, store, req.user.tenantId, channel.channelId);
-    console.log('[Sync Route] Result:', JSON.stringify(result));
-    res.json({ success: true, result });
+    const results = [];
+    for (const channel of channels) {
+      const sock = whatsappService.getSession(channel.channelId);
+      if (!sock) continue;
+      const store = whatsappService.getStore(channel.channelId);
+      results.push({ channelId: channel.channelId, ...(await syncContacts(sock, store, req.user.tenantId, channel.channelId)) });
+    }
+    if (!results.length) return res.json({ success: false, message: 'No active WhatsApp session found' });
+    res.json({ success: true, results });
   } catch (error) {
     console.error('[Sync Route] Error:', error);
     res.status(500).json({ success: false, message: error.message });

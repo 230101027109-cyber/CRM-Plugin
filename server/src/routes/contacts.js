@@ -1,6 +1,7 @@
 const express = require('express');
 const authenticate = require('../middleware/auth');
 const { getChatList, getContacts, getGroups, searchContacts, addContactTag, updateContactNotes, createOrUpdateContact } = require('../controllers/contactController');
+const Channel = require('../models/Channel');
 
 const router = express.Router();
 
@@ -44,7 +45,18 @@ router.get('/search', authenticate, async (req, res) => {
 
 router.post('/', authenticate, async (req, res) => {
   try {
-    const contact = await createOrUpdateContact(req.body);
+    const { name, phone, channelId } = req.body;
+    if (!name?.trim() || !phone) return res.status(400).json({ success: false, message: 'Name and phone are required' });
+    let resolvedChannelId = channelId;
+    if (resolvedChannelId) {
+      const channel = await Channel.findOne({ tenantId: req.user.tenantId, channelId: resolvedChannelId });
+      if (!channel) return res.status(400).json({ success: false, message: 'Invalid channel' });
+    } else {
+      const channel = await Channel.findOne({ tenantId: req.user.tenantId, status: 'connected' }).sort({ createdAt: 1 });
+      if (!channel) return res.status(400).json({ success: false, message: 'Connect a WhatsApp channel before creating a contact' });
+      resolvedChannelId = channel.channelId;
+    }
+    const contact = await createOrUpdateContact(req.user.tenantId, { ...req.body, name: name.trim(), channelId: resolvedChannelId });
     res.json({ success: true, data: contact });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -55,7 +67,7 @@ router.post('/:jid/tags', authenticate, async (req, res) => {
   try {
     const { tag } = req.body;
     if (!tag) return res.status(400).json({ success: false, message: 'Tag required' });
-    const contact = await addContactTag(req.params.jid, tag);
+    const contact = await addContactTag(req.user.tenantId, req.params.jid, tag);
     res.json({ success: true, data: contact });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -64,7 +76,7 @@ router.post('/:jid/tags', authenticate, async (req, res) => {
 
 router.put('/:jid/notes', authenticate, async (req, res) => {
   try {
-    const contact = await updateContactNotes(req.params.jid, req.body.notes);
+    const contact = await updateContactNotes(req.user.tenantId, req.params.jid, req.body.notes);
     res.json({ success: true, data: contact });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

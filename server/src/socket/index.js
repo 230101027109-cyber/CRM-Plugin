@@ -36,6 +36,9 @@ const initSocket = (server) => {
     const actualSender = msg.key?.participant || msg.key?.remoteJid || '';
     const timestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000) : new Date();
 
+    // Ignore WhatsApp protocol/control traffic; it is not a conversation item.
+    if (!remoteJid || remoteJid === 'status@broadcast' || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) return;
+
     const messageContent = msg.message?.conversation ||
                            msg.message?.extendedTextMessage?.text ||
                            msg.message?.imageMessage?.caption ||
@@ -49,39 +52,46 @@ const initSocket = (server) => {
                         msg.message?.stickerMessage ? 'sticker' :
                         'text';
 
-    const saved = await saveMessage({
-      messageId: id || uuid.v4(),
-      tenantId,
-      channelId,
-      remoteJid: String(remoteJid),
-      senderJid: String(actualSender),
-      content: messageContent,
-      messageType,
-      fromMe,
-      timestamp,
-      participants: [String(msg.key?.participant || remoteJid)],
-    });
+    try {
+      const result = await saveMessage({
+        messageId: id || uuid.v4(),
+        tenantId,
+        channelId,
+        remoteJid: String(remoteJid),
+        senderJid: String(actualSender),
+        content: messageContent,
+        messageType,
+        fromMe,
+        timestamp,
+        participants: [String(msg.key?.participant || remoteJid)],
+      });
+      const saved = result.message;
 
-    // Broadcast to all users in this tenant
-    io.to(`tenant:${tenantId}`).emit('new_message', {
-      remoteJid: String(remoteJid),
-      message: saved,
-    });
+      // Broadcast even for a retry: the client-side message id de-duplicates
+      // it, and a temporarily disconnected browser can still recover it.
+      io.to(`tenant:${tenantId}`).emit('new_message', {
+        remoteJid: String(remoteJid),
+        message: saved,
+      });
     
     // Trigger Workflow Engine
     const { processEvent } = require('../services/workflowEngine');
     const Contact = require('../models/Contact');
     
-    if (!fromMe) {
-      const contact = await Contact.findOne({ tenantId, jid: String(remoteJid) }).select('_id');
-      await processEvent(tenantId, 'message_received', {
-        tenantId,
-        channelId,
-        remoteJid: String(remoteJid),
-        contactId: contact?._id || null,
-        message: messageContent,
-        isFirstMessage: !contact
-      });
+      if (!fromMe && result.created) {
+        const contact = await Contact.findOne({ tenantId, jid: String(remoteJid) }).select('_id');
+        await processEvent(tenantId, 'message_received', {
+          tenantId,
+          channelId,
+          remoteJid: String(remoteJid),
+          contactId: contact?._id || null,
+          message: messageContent,
+          isFirstMessage: !contact
+        });
+      }
+    } catch (error) {
+      // Never let one malformed/replayed event stop processing later messages.
+      console.error(`[Socket] Could not persist message ${id || 'unknown'}:`, error.message);
     }
   });
 
@@ -97,7 +107,7 @@ const initSocket = (server) => {
     socket.join(`tenant:${socket.user.tenantId}`);
 
     socket.on('join_chat', async (jid) => {
-      await markAsRead(jid);
+      await markAsRead(socket.user.tenantId, jid);
       socket.join(`chat:${jid}`);
       socket.emit('messages_marked_read', { jid });
     });
