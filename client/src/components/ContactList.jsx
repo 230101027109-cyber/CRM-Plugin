@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Search, UserX, RefreshCw, Plus, X } from 'lucide-react';
-import { contactsAPI, whatsappAPI } from '../services/api';
+import { Search, UserX, RefreshCw, Plus, X, MessageSquarePlus } from 'lucide-react';
+import { contactsAPI, whatsappAPI, channelsAPI } from '../services/api';
 
 const ContactList = ({ onSelectContact }) => {
   const [contacts, setContacts] = useState([]);
@@ -11,6 +11,11 @@ const ContactList = ({ onSelectContact }) => {
   const [newContact, setNewContact] = useState({ name: '', phone: '' });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [showConversationModal, setShowConversationModal] = useState(false);
+  const [channels, setChannels] = useState([]);
+  const [selectedContactForConversation, setSelectedContactForConversation] = useState(null);
+  const [conversationChannelId, setConversationChannelId] = useState('');
+  const [startingConversation, setStartingConversation] = useState(false);
 
   useEffect(() => {
     fetchContacts();
@@ -52,11 +57,45 @@ const ContactList = ({ onSelectContact }) => {
       setShowCreate(false);
       setNewContact({ name: '', phone: '' });
       await fetchContacts();
-      onSelectContact(res.data.data);
     } catch (error) {
       setCreateError(error.response?.data?.message || error.message || 'Could not create contact');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openConversationModal = async (contact = null) => {
+    try {
+      const res = await channelsAPI.getAll();
+      const connectedChannels = (res.data?.data || []).filter(ch => ch.status === 'connected');
+      setChannels(connectedChannels);
+      if (connectedChannels.length === 0) {
+        alert('Connect at least one WhatsApp channel before creating a conversation.');
+        return;
+      }
+      setConversationChannelId(connectedChannels[0].channelId);
+      setSelectedContactForConversation(contact);
+      setShowConversationModal(true);
+    } catch (error) {
+      console.error('Error loading channels:', error);
+      alert('Could not load channels for conversation creation.');
+    }
+  };
+
+  const handleCreateConversation = async () => {
+    if (!selectedContactForConversation) return;
+    setStartingConversation(true);
+    try {
+      const conversationContact = {
+        ...selectedContactForConversation,
+        channelId: conversationChannelId,
+        conversationKey: `${conversationChannelId}::${selectedContactForConversation.jid}`,
+      };
+      onSelectContact(conversationContact);
+      setShowConversationModal(false);
+      setSelectedContactForConversation(null);
+    } finally {
+      setStartingConversation(false);
     }
   };
 
@@ -78,6 +117,13 @@ const ContactList = ({ onSelectContact }) => {
               className="p-1.5 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
             >
               <Plus size={16} />
+            </button>
+            <button
+              onClick={() => openConversationModal()}
+              title="Create conversation"
+              className="p-1.5 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
+            >
+              <MessageSquarePlus size={16} />
             </button>
             <button
               onClick={handleSync}
@@ -143,8 +189,7 @@ const ContactList = ({ onSelectContact }) => {
           filteredContacts.map(contact => (
             <div
               key={contact.jid}
-              onClick={() => onSelectContact(contact)}
-              className="flex items-center p-3 cursor-pointer hover:bg-gray-50 border-b"
+              className="flex items-center p-3 border-b hover:bg-gray-50"
             >
               <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium flex-shrink-0">
                 {(contact.name || contact.pushName || contact.phone || '?').charAt(0).toUpperCase()}
@@ -154,11 +199,57 @@ const ContactList = ({ onSelectContact }) => {
                 <p className="text-xs text-gray-500">{contact.phone}</p>
                 {contact.isBusiness && <span className="text-xs text-blue-600">Business</span>}
               </div>
-              {contact.isOnline && <span className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></span>}
+              <button
+                type="button"
+                onClick={() => openConversationModal(contact)}
+                className="ml-2 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100"
+              >
+                Start chat
+              </button>
+              {contact.isOnline && <span className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0 ml-2"></span>}
             </div>
           ))
         )}
       </div>
+
+      {showConversationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <h2 className="font-semibold text-gray-900">Create conversation</h2>
+              <button type="button" onClick={() => setShowConversationModal(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+            <div className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Select channel</label>
+                <select
+                  value={conversationChannelId}
+                  onChange={e => setConversationChannelId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none"
+                >
+                  {channels.map(channel => (
+                    <option key={channel.channelId} value={channel.channelId}>{channel.channelName || channel.channelId}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Contact</label>
+                <input
+                  readOnly
+                  value={selectedContactForConversation ? (selectedContactForConversation.name || selectedContactForConversation.phone) : ''}
+                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <button type="button" onClick={() => setShowConversationModal(false)} className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+              <button disabled={startingConversation || !selectedContactForConversation} type="button" onClick={handleCreateConversation} className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:bg-gray-300">
+                {startingConversation ? 'Starting...' : 'Open conversation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

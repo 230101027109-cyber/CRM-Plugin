@@ -25,8 +25,8 @@ const contactSchema = new mongoose.Schema({
   notes: { type: String, default: '' },
 }, { timestamps: true });
 
-contactSchema.index({ tenantId: 1, jid: 1 }, { unique: true });
-contactSchema.index({ phone: 1 });
+contactSchema.index({ tenantId: 1, channelId: 1, jid: 1 }, { unique: true });
+contactSchema.index({ tenantId: 1, channelId: 1, phone: 1 });
 contactSchema.index({ name: 1 });
 
 module.exports = mongoose.model('Contact', contactSchema);

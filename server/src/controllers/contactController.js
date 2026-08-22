@@ -1,5 +1,6 @@
 const Contact = require('../models/Contact');
 const ChatMessage = require('../models/ChatMessage');
+const { buildConversationKey } = require('../utils/conversationKey');
 
 const getChatList = async (tenantId) => {
   const contacts = await Contact.find({ tenantId }, 'jid name phone pushName isGroup channelId lastMessage lastMessageTime isOnline unreadCount profilePicUrl')
@@ -12,6 +13,7 @@ const getChatList = async (tenantId) => {
     phone: contact.phone,
     isGroup: contact.isGroup,
     channelId: contact.channelId,
+    conversationKey: buildConversationKey(contact.channelId, contact.jid),
     isOnline: contact.isOnline,
     lastMessage: contact.lastMessage,
     lastMessageTime: contact.lastMessageTime,
@@ -97,7 +99,7 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
                           chat.lastMessage?.message?.extendedTextMessage?.text || '';
 
       await upsertContact(
-        { tenantId, jid },
+        { tenantId, channelId, jid },
         {
           tenantId,
           channelId,
@@ -130,7 +132,7 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
       if (!jid || jid.includes('@g.us')) continue;
       const phone = jid.split('@')[0].split(':')[0];
       await upsertContact(
-        { tenantId, jid },
+        { tenantId, channelId, jid },
         {
           tenantId,
           channelId,
@@ -158,7 +160,7 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
       if (!jid || jid.includes('@g.us')) continue;
       const phone = jid.split('@')[0].split(':')[0];
       await upsertContact(
-        { tenantId, jid },
+        { tenantId, channelId, jid },
         {
           tenantId,
           channelId,
@@ -184,11 +186,14 @@ const createOrUpdateContact = async (tenantId, data) => {
   if (!phone) throw new Error('A valid phone number is required');
   const jid = data.jid || `${phone}@s.whatsapp.net`;
 
+  const channelId = data.channelId || data.channel || null;
+
   return await Contact.findOneAndUpdate(
-    { tenantId, $or: [{ jid }, { phone }] },
+    { tenantId, ...(channelId ? { channelId } : {}), $or: [{ jid }, { phone }] },
     {
       ...data,
       tenantId,
+      ...(channelId ? { channelId } : {}),
       jid,
       phone,
       isGroup: false,
@@ -209,8 +214,8 @@ const mergeContactIdentity = async ({ tenantId, channelId, lid, jid }) => {
 
   const phone = jid.split('@')[0].split(':')[0];
   const [phoneContact, lidContact] = await Promise.all([
-    Contact.findOne({ tenantId, jid }),
-    Contact.findOne({ tenantId, jid: lid }),
+    Contact.findOne({ tenantId, channelId, jid }),
+    Contact.findOne({ tenantId, channelId, jid: lid }),
   ]);
 
   if (phoneContact) {

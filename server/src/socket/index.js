@@ -4,6 +4,7 @@ const uuid = require('uuid');
 const { setGlobalMessageHandler, setGlobalQRHandler, getCanonicalJid } = require('../services/baileysService');
 const { saveMessage, markAsRead } = require('../controllers/messageController');
 const Contact = require('../models/Contact');
+const { buildConversationKey } = require('../utils/conversationKey');
 
 const initSocket = (server) => {
   const io = new Server(server, {
@@ -76,8 +77,10 @@ const initSocket = (server) => {
 
       // Broadcast even for a retry: the client-side message id de-duplicates
       // it, and a temporarily disconnected browser can still recover it.
+      const conversationKey = buildConversationKey(channelId, String(remoteJid));
       io.to(`tenant:${tenantId}`).emit('new_message', {
         remoteJid: String(remoteJid),
+        conversationKey,
         message: saved,
       });
     
@@ -111,14 +114,17 @@ const initSocket = (server) => {
     // Join tenant room to receive tenant-specific events
     socket.join(`tenant:${socket.user.tenantId}`);
 
-    socket.on('join_chat', async (jid) => {
-      await markAsRead(socket.user.tenantId, jid);
-      socket.join(`chat:${jid}`);
-      socket.emit('messages_marked_read', { jid });
+    socket.on('join_chat', async ({ jid, channelId } = {}) => {
+      if (!jid) return;
+      const conversationKey = buildConversationKey(channelId, jid);
+      await markAsRead(socket.user.tenantId, jid, channelId);
+      socket.join(`chat:${conversationKey}`);
+      socket.emit('messages_marked_read', { jid, channelId, conversationKey });
     });
 
-    socket.on('leave_chat', (jid) => {
-      socket.leave(`chat:${jid}`);
+    socket.on('leave_chat', ({ jid, channelId } = {}) => {
+      if (!jid) return;
+      socket.leave(`chat:${buildConversationKey(channelId, jid)}`);
     });
 
     socket.on('disconnect', async () => {

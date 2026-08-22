@@ -13,6 +13,7 @@ const healthRoutes = require('./routes/health');
 const channelsRoutes = require('./routes/channels');
 const ticketsRoutes = require('./routes/tickets');
 const workflowsRoutes = require('./routes/workflows');
+const conversationsRoutes = require('./routes/conversations');
 const loggerMiddleware = require('./middleware/logger');
 const path = require('path');
 
@@ -36,6 +37,7 @@ app.use('/api/messages', messagesRoutes);
 app.use('/api/channels', channelsRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/workflows', workflowsRoutes);
+app.use('/api/conversations', conversationsRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '../public')));
 app.use('/data', express.static(path.join(__dirname, '../public')));

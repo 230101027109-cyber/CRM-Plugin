@@ -39,10 +39,11 @@ export const SocketProvider = ({ children }) => {
       setQrCode(qr);
     });
 
-    newSocket.on('new_message', ({ remoteJid, message }) => {
+    newSocket.on('new_message', ({ remoteJid, conversationKey, message }) => {
+      const key = conversationKey || remoteJid;
       setNewMessages(prev => ({
         ...prev,
-        [remoteJid]: [...(prev[remoteJid] || []), message],
+        [key]: [...(prev[key] || []), message],
       }));
     });
 
@@ -67,12 +68,12 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
-  const joinChat = useCallback((jid) => {
-    socket?.emit('join_chat', jid);
+  const joinChat = useCallback((jid, channelId) => {
+    socket?.emit('join_chat', { jid, channelId });
   }, [socket]);
 
-  const leaveChat = useCallback((jid) => {
-    socket?.emit('leave_chat', jid);
+  const leaveChat = useCallback((jid, channelId) => {
+    socket?.emit('leave_chat', { jid, channelId });
   }, [socket]);
 
   return (

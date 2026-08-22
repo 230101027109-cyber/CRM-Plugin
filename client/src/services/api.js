@@ -38,6 +38,15 @@ export const whatsappAPI = {
   sync: () => api.post('/whatsapp/sync'),
 };
 
+export const channelsAPI = {
+  getAll: () => api.get('/channels'),
+};
+
+export const conversationsAPI = {
+  getAll: () => api.get('/conversations'),
+  open: (payload) => api.post('/conversations/open', payload),
+};
+
 export const contactsAPI = {
   getChatList: () => api.get('/contacts/chats'),
   getContacts: () => api.get('/contacts/contacts'),
@@ -49,8 +58,8 @@ export const contactsAPI = {
 };
 
 export const messagesAPI = {
-  getMessages: (remoteJid, limit, before) =>
-    api.get(`/messages/${remoteJid}`, { params: { limit, before } }),
+  getMessages: (remoteJid, limit, before, channelId) =>
+    api.get(`/messages/${remoteJid}`, { params: { limit, before, channelId } }),
   sendMessage: (remoteJid, content, options = {}) =>
     api.post('/messages/send', { remoteJid, content, ...options }),
 };

@@ -9,8 +9,8 @@ const router = express.Router();
 router.get('/:remoteJid', authenticate, async (req, res) => {
   try {
     const { remoteJid } = req.params;
-    const { limit = 50, before } = req.query;
-    const messages = await getMessagesForTenant(req.user.tenantId, remoteJid, parseInt(limit), before);
+    const { limit = 50, before, channelId } = req.query;
+    const messages = await getMessagesForTenant(req.user.tenantId, remoteJid, parseInt(limit), before, channelId || undefined);
     res.json({ success: true, data: messages });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

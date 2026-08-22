@@ -1,15 +1,20 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { contactsAPI } from '../services/api';
+import { contactsAPI, channelsAPI, conversationsAPI } from '../services/api';
 import { useSocket } from '../hooks/useSocket.jsx';
 import { useAuth } from '../hooks/useAuth.jsx';
 import moment from 'moment';
-import { Search } from 'lucide-react';
+import { Search, Plus, X } from 'lucide-react';
 
 const ChatList = ({ onSelectChat, activeChat }) => {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showCreateConversation, setShowCreateConversation] = useState(false);
+  const [channels, setChannels] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [selectedChannelId, setSelectedChannelId] = useState('');
+  const [selectedContactId, setSelectedContactId] = useState('');
   const { isConnected, newMessages } = useSocket();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -22,6 +27,22 @@ const ChatList = ({ onSelectChat, activeChat }) => {
       console.error('Error fetching chats:', error);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadCreateConversationOptions = useCallback(async () => {
+    try {
+      const [channelsRes, contactsRes] = await Promise.all([
+        channelsAPI.getAll(),
+        contactsAPI.getContacts(),
+      ]);
+      const connected = (channelsRes.data?.data || []).filter(ch => ch.status === 'connected');
+      setChannels(connected);
+      setContacts(contactsRes.data?.data || []);
+      if (connected.length > 0) setSelectedChannelId(connected[0].channelId);
+      if ((contactsRes.data?.data || []).length > 0) setSelectedContactId((contactsRes.data.data[0].jid));
+    } catch (error) {
+      console.error('Error loading conversation options:', error);
     }
   }, []);
 
@@ -39,7 +60,8 @@ const ChatList = ({ onSelectChat, activeChat }) => {
   const enrichedChats = useMemo(() => {
     if (!newMessages || Object.keys(newMessages).length === 0) return chats;
     return chats.map(chat => {
-      const socketMsgs = newMessages[chat.jid];
+      const conversationKey = chat.conversationKey || `${chat.channelId || 'no-channel'}::${chat.jid}`;
+      const socketMsgs = newMessages[conversationKey] || newMessages[chat.jid];
       if (!socketMsgs) return chat;
       const unreadFromSocket = socketMsgs.filter(m => !m.fromMe && !m.read).length;
       // Take the higher of API unread count and socket unread count
@@ -65,6 +87,40 @@ const ChatList = ({ onSelectChat, activeChat }) => {
       (c.lastMessage || '').toLowerCase().includes(q)
     );
   }, [enrichedChats, searchQuery]);
+
+  const startConversation = async () => {
+    const contact = contacts.find(c => c.jid === selectedContactId);
+    if (!contact) return;
+    const selectedChannel = channels.find(ch => ch.channelId === selectedChannelId);
+    if (!selectedChannel) return;
+
+    try {
+      const res = await conversationsAPI.open({
+        channelId: selectedChannel.channelId,
+        contactId: contact._id,
+        jid: contact.jid,
+        name: contact.name || contact.pushName || contact.phone,
+        phone: contact.phone,
+      });
+
+      const conversation = res.data?.data || {
+        conversationId: null,
+        channelId: selectedChannel.channelId,
+      };
+
+      onSelectChat({
+        ...contact,
+        conversationId: conversation.conversationId,
+        channelId: selectedChannel.channelId,
+        conversationKey: `${selectedChannel.channelId}::${contact.jid}`,
+        name: contact.name || contact.pushName || contact.phone,
+      });
+      setShowCreateConversation(false);
+    } catch (error) {
+      console.error('Error creating conversation:', error);
+      alert('Could not open this conversation.');
+    }
+  };
 
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
@@ -132,6 +188,47 @@ const ChatList = ({ onSelectChat, activeChat }) => {
           ))
         )}
       </div>
+
+      {showCreateConversation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <h2 className="font-semibold text-gray-900">Create conversation</h2>
+              <button type="button" onClick={() => setShowCreateConversation(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+            <div className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Select channel</label>
+                <select
+                  value={selectedChannelId}
+                  onChange={e => setSelectedChannelId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none"
+                >
+                  {channels.map(channel => (
+                    <option key={channel.channelId} value={channel.channelId}>{channel.channelName || channel.channelId}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Select contact</label>
+                <select
+                  value={selectedContactId}
+                  onChange={e => setSelectedContactId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none"
+                >
+                  {contacts.map(contact => (
+                    <option key={contact.jid} value={contact.jid}>{contact.name || contact.pushName || contact.phone}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <button type="button" onClick={() => setShowCreateConversation(false)} className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+              <button type="button" onClick={startConversation} className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700">Open conversation</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

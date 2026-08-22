@@ -57,19 +57,21 @@ const ChatWindow = ({ chat, onBack }) => {
   const { newMessages, joinChat, leaveChat } = useSocket();
 
   // Fetch messages on chat change
+  const conversationKey = chat ? (chat.conversationKey || `${chat.channelId || 'no-channel'}::${chat.jid}`) : '';
+
   useEffect(() => {
     if (!chat) return;
     seenIdsRef.current = new Set();
     setInitialScrollDone(false);
     setLoading(true);
     fetchMessages();
-    joinChat(chat.jid);
-    return () => leaveChat(chat.jid);
-  }, [chat?.jid]);
+    joinChat(chat.jid, chat.channelId);
+    return () => leaveChat(chat.jid, chat.channelId);
+  }, [chat?.jid, chat?.channelId]);
 
   const fetchMessages = async () => {
     try {
-      const res = await messagesAPI.getMessages(chat.jid, 50);
+      const res = await messagesAPI.getMessages(chat.jid, 50, undefined, chat.channelId);
       if (res.data.success) {
         const msgs = res.data.data || [];
         // Populate seen IDs from fetched messages
@@ -85,7 +87,7 @@ const ChatWindow = ({ chat, onBack }) => {
 
   // Handle real-time incoming messages from socket with dedup
   useEffect(() => {
-    const incoming = newMessages?.[chat?.jid] || [];
+    const incoming = newMessages?.[conversationKey] || newMessages?.[chat?.jid] || [];
     if (incoming.length === 0) return;
 
     setMessages(prev => {
@@ -147,6 +149,7 @@ const ChatWindow = ({ chat, onBack }) => {
 
     const optimisticMsg = {
       remoteJid: chat.jid,
+      channelId: chat.channelId,
       content,
       messageType: type,
       fromMe: true,

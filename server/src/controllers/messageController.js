@@ -1,5 +1,6 @@
 const ChatMessage = require('../models/ChatMessage');
 const Contact = require('../models/Contact');
+const { updateConversationFromMessage } = require('./conversationController');
 
 const getMessages = async (remoteJid, limit = 50, before) => {
   const query = { remoteJid };
@@ -12,8 +13,9 @@ const getMessages = async (remoteJid, limit = 50, before) => {
   return messages.reverse();
 };
 
-const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before) => {
+const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before, channelId) => {
   const query = { tenantId, remoteJid };
+  if (channelId) query.channelId = channelId;
   if (before) query.timestamp = { $lt: new Date(before) };
 
   const messages = await ChatMessage.find(query)
@@ -50,7 +52,7 @@ const saveMessage = async (data) => {
   }
 
   await Contact.findOneAndUpdate(
-    { tenantId: data.tenantId, jid: data.remoteJid },
+    { tenantId: data.tenantId, channelId: data.channelId, jid: data.remoteJid },
     {
       tenantId: data.tenantId,
       channelId: data.channelId,
@@ -62,12 +64,27 @@ const saveMessage = async (data) => {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
+  await updateConversationFromMessage({
+    tenantId: data.tenantId,
+    channelId: data.channelId,
+    remoteJid: data.remoteJid,
+    content: data.content || data.caption || '',
+    timestamp: data.timestamp || new Date(),
+    fromMe: data.fromMe,
+  });
+
   return { message: saved, created: true };
 };
 
-const markAsRead = async (tenantId, remoteJid) => {
-  await ChatMessage.updateMany({ tenantId, remoteJid, read: false }, { read: true, updatedAt: new Date() });
-  await Contact.findOneAndUpdate({ tenantId, jid: remoteJid }, { unreadCount: 0 });
+const markAsRead = async (tenantId, remoteJid, channelId) => {
+  const query = { tenantId, remoteJid, read: false };
+  if (channelId) query.channelId = channelId;
+
+  await ChatMessage.updateMany(query, { read: true, updatedAt: new Date() });
+  const contactQuery = { tenantId, jid: remoteJid };
+  if (channelId) contactQuery.channelId = channelId;
+
+  await Contact.findOneAndUpdate(contactQuery, { unreadCount: 0 });
 };
 
 const getUnreadCount = async (tenantId, remoteJid) => {
