@@ -137,15 +137,28 @@ const ChatList = ({ onSelectChat, activeChat }) => {
           <button onClick={() => navigate('/contacts')} className="px-3 py-1 text-sm bg-white text-gray-600 rounded-md hover:bg-gray-100">Contacts</button>
           <button onClick={() => navigate('/groups')} className="px-3 py-1 text-sm bg-white text-gray-600 rounded-md hover:bg-gray-100">Groups</button>
         </nav>
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search chats..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-green-500"
-          />
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search chats..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-green-500"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              loadCreateConversationOptions();
+              setShowCreateConversation(true);
+            }}
+            className="inline-flex items-center justify-center rounded-lg bg-green-600 px-2.5 py-2 text-white hover:bg-green-700 transition-colors"
+            title="Create conversation"
+          >
+            <Plus size={16} />
+          </button>
         </div>
       </div>
 

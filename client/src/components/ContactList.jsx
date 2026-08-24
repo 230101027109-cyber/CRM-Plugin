@@ -14,6 +14,7 @@ const ContactList = ({ onSelectContact }) => {
   const [showConversationModal, setShowConversationModal] = useState(false);
   const [channels, setChannels] = useState([]);
   const [selectedContactForConversation, setSelectedContactForConversation] = useState(null);
+  const [selectedContactJid, setSelectedContactJid] = useState('');
   const [conversationChannelId, setConversationChannelId] = useState('');
   const [startingConversation, setStartingConversation] = useState(false);
 
@@ -74,7 +75,9 @@ const ContactList = ({ onSelectContact }) => {
         return;
       }
       setConversationChannelId(connectedChannels[0].channelId);
-      setSelectedContactForConversation(contact);
+      const nextContact = contact || contacts[0] || null;
+      setSelectedContactForConversation(nextContact);
+      setSelectedContactJid(nextContact ? nextContact.jid : '');
       setShowConversationModal(true);
     } catch (error) {
       console.error('Error loading channels:', error);
@@ -83,17 +86,19 @@ const ContactList = ({ onSelectContact }) => {
   };
 
   const handleCreateConversation = async () => {
-    if (!selectedContactForConversation) return;
+    const contact = contacts.find(c => c.jid === selectedContactJid) || selectedContactForConversation;
+    if (!contact) return;
     setStartingConversation(true);
     try {
       const conversationContact = {
-        ...selectedContactForConversation,
+        ...contact,
         channelId: conversationChannelId,
-        conversationKey: `${conversationChannelId}::${selectedContactForConversation.jid}`,
+        conversationKey: `${conversationChannelId}::${contact.jid}`,
       };
       onSelectContact(conversationContact);
       setShowConversationModal(false);
       setSelectedContactForConversation(null);
+      setSelectedContactJid('');
     } finally {
       setStartingConversation(false);
     }
@@ -212,13 +217,6 @@ const ContactList = ({ onSelectContact }) => {
                 <p className="text-xs text-gray-500">{contact.phone}</p>
                 {contact.isBusiness && <span className="text-xs text-blue-600">Business</span>}
               </div>
-              <button
-                type="button"
-                onClick={() => openConversationModal(contact)}
-                className="ml-2 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100"
-              >
-                Start chat
-              </button>
               <button
                 type="button"
                 onClick={() => handleDeleteContact(contact)}
