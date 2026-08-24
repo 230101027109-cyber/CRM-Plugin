@@ -53,6 +53,7 @@ export const contactsAPI = {
   getGroups: () => api.get('/contacts/groups'),
   search: (q) => api.get(`/contacts/search?q=${q}`),
   update: (data) => api.post('/contacts', data),
+  delete: (id) => api.delete(`/contacts/${id}`),
   addTag: (jid, tag) => api.post(`/contacts/${jid}/tags`, { tag }),
   updateNotes: (jid, notes) => api.put(`/contacts/${jid}/notes`, { notes }),
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, UserX, RefreshCw, Plus, X, MessageSquarePlus } from 'lucide-react';
+import { Search, UserX, RefreshCw, Plus, X, MessageSquarePlus, Trash2 } from 'lucide-react';
 import { contactsAPI, whatsappAPI, channelsAPI } from '../services/api';
 
 const ContactList = ({ onSelectContact }) => {
@@ -96,6 +96,19 @@ const ContactList = ({ onSelectContact }) => {
       setSelectedContactForConversation(null);
     } finally {
       setStartingConversation(false);
+    }
+  };
+
+  const handleDeleteContact = async (contact) => {
+    if (!contact?._id) return;
+    if (!window.confirm(`Delete contact ${contact.name || contact.phone}?`)) return;
+
+    try {
+      await contactsAPI.delete(contact._id);
+      await fetchContacts();
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+      alert('Could not delete contact.');
     }
   };
 
@@ -205,6 +218,14 @@ const ContactList = ({ onSelectContact }) => {
                 className="ml-2 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100"
               >
                 Start chat
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteContact(contact)}
+                className="ml-2 p-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                title="Delete contact"
+              >
+                <Trash2 size={14} />
               </button>
               {contact.isOnline && <span className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0 ml-2"></span>}
             </div>

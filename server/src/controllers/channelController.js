@@ -1,4 +1,6 @@
 const Channel = require('../models/Channel');
+const Conversation = require('../models/Conversation');
+const ChatMessage = require('../models/ChatMessage');
 const whatsappService = require('../services/baileysService');
 
 const reconcileChannelStatus = async (channel) => {
@@ -85,8 +87,13 @@ const deleteChannel = async (req, res) => {
       await whatsappService.stopSession(channel.channelId);
     }
 
-    await Channel.deleteOne({ _id: req.params.id });
-    res.json({ success: true, message: 'Channel deleted' });
+    await Promise.all([
+      Channel.deleteOne({ _id: req.params.id, tenantId: req.user.tenantId }),
+      Conversation.deleteMany({ tenantId: req.user.tenantId, channelId: channel.channelId }),
+      ChatMessage.deleteMany({ tenantId: req.user.tenantId, channelId: channel.channelId }),
+    ]);
+
+    res.json({ success: true, message: 'Channel deleted and channel conversations removed' });
   } catch (error) {
     console.error('Error deleting channel:', error);
     res.status(500).json({ success: false, message: 'Server error' });

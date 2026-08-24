@@ -1,5 +1,6 @@
 const Contact = require('../models/Contact');
 const ChatMessage = require('../models/ChatMessage');
+const Conversation = require('../models/Conversation');
 const { buildConversationKey } = require('../utils/conversationKey');
 
 const getChatList = async (tenantId) => {
@@ -258,6 +259,20 @@ const updateContactNotes = async (tenantId, jid, notes) => {
   );
 };
 
+const deleteContact = async (tenantId, contactId) => {
+  const contact = await Contact.findOne({ _id: contactId, tenantId });
+  if (!contact) return { deleted: false, contact: null };
+
+  await Promise.all([
+    Contact.deleteOne({ _id: contactId, tenantId }),
+    Conversation.deleteMany({ tenantId, contactId }),
+    Conversation.deleteMany({ tenantId, contactJid: contact.jid }),
+    ChatMessage.deleteMany({ tenantId, remoteJid: contact.jid }),
+  ]);
+
+  return { deleted: true, contact };
+};
+
 const searchContacts = async (query, tenantId) => {
   const regex = new RegExp(query, 'i');
   return await Contact.find({
@@ -280,5 +295,6 @@ module.exports = {
   mergeContactIdentity,
   addContactTag,
   updateContactNotes,
+  deleteContact,
   searchContacts,
 };

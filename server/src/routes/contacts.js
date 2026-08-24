@@ -1,6 +1,6 @@
 const express = require('express');
 const authenticate = require('../middleware/auth');
-const { getChatList, getContacts, getGroups, searchContacts, addContactTag, updateContactNotes, createOrUpdateContact } = require('../controllers/contactController');
+const { getChatList, getContacts, getGroups, searchContacts, addContactTag, updateContactNotes, createOrUpdateContact, deleteContact } = require('../controllers/contactController');
 const Channel = require('../models/Channel');
 
 const router = express.Router();
@@ -78,6 +78,16 @@ router.put('/:jid/notes', authenticate, async (req, res) => {
   try {
     const contact = await updateContactNotes(req.user.tenantId, req.params.jid, req.body.notes);
     res.json({ success: true, data: contact });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const result = await deleteContact(req.user.tenantId, req.params.id);
+    if (!result.deleted) return res.status(404).json({ success: false, message: 'Contact not found' });
+    res.json({ success: true, message: 'Contact deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
