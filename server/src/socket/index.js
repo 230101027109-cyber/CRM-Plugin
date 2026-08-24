@@ -1,22 +1,41 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const uuid = require('uuid');
-const { setGlobalMessageHandler, setGlobalQRHandler, getCanonicalJid } = require('../services/baileysService');
-const { saveMessage, markAsRead } = require('../controllers/messageController');
+
+const {
+  setGlobalMessageHandler,
+  setGlobalQRHandler,
+  getCanonicalJid,
+} = require('../services/baileysService');
+
+const {
+  saveMessage,
+  markAsRead,
+} = require('../controllers/messageController');
+
 const Contact = require('../models/Contact');
-const { buildConversationKey } = require('../utils/conversationKey');
+
+const {
+  buildConversationKey,
+} = require('../utils/conversationKey');
 
 const initSocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:3000',
+      origin:
+        process.env.NODE_ENV === 'production'
+          ? false
+          : 'http://localhost:3000',
       credentials: true,
     },
   });
 
   const authenticateSocket = (token) => {
     try {
-      return jwt.verify(token, process.env.JWT_SECRET);
+      return jwt.verify(
+        token,
+        process.env.JWT_SECRET
+      );
     } catch {
       return null;
     }
@@ -24,45 +43,108 @@ const initSocket = (server) => {
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
+
     const user = authenticateSocket(token);
-    if (!user) return next(new Error('Authentication error'));
+
+    if (!user) {
+      return next(
+        new Error('Authentication error')
+      );
+    }
+
     socket.user = user;
     next();
   });
 
-  setGlobalMessageHandler(async ({ tenantId, channelId, msg }) => {
-    if (!msg?.key) return;
-
-    const { remoteJid: rawRemoteJid, id } = msg.key;
-    let remoteJid = getCanonicalJid(channelId, String(rawRemoteJid));
-    // Preserve a LID mapping learned before a server restart.
-    if (remoteJid.endsWith('@lid')) {
-      const knownContact = await Contact.findOne({ tenantId, aliases: remoteJid }).select('jid');
-      if (knownContact?.jid) remoteJid = knownContact.jid;
+  setGlobalMessageHandler(async ({
+    tenantId,
+    channelId,
+    msg,
+  }) => {
+    if (!msg?.key) {
+      return;
     }
-    const fromMe = msg.key.fromMe || false;
-    const actualSender = msg.key?.participant || msg.key?.remoteJid || '';
-    const timestamp = msg.messageTimestamp ? new Date(msg.messageTimestamp * 1000) : new Date();
 
-    // Ignore WhatsApp protocol/control traffic; it is not a conversation item.
-    if (!remoteJid || remoteJid === 'status@broadcast' || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) return;
+    const rawRemoteJid = msg.key.remoteJid;
 
-    const messageContent = msg.message?.conversation ||
-                           msg.message?.extendedTextMessage?.text ||
-                           msg.message?.imageMessage?.caption ||
-                           msg.message?.videoMessage?.caption ||
-                           '';
+    if (!rawRemoteJid) {
+      return;
+    }
 
-    const messageType = msg.message?.imageMessage ? 'image' :
-                        msg.message?.videoMessage ? 'video' :
-                        msg.message?.audioMessage ? 'audio' :
-                        msg.message?.documentMessage ? 'document' :
-                        msg.message?.stickerMessage ? 'sticker' :
-                        'text';
+    const messageId =
+      msg.key.id ||
+      uuid.v4();
+
+    // Resolve LID using the in-memory channel-specific mapping first.
+    let remoteJid = getCanonicalJid(
+      channelId,
+      String(rawRemoteJid)
+    );
+
+    // Then resolve against MongoDB.
+    // IMPORTANT:
+    // tenantId + channelId must both be part of the lookup.
+    if (remoteJid.endsWith('@lid')) {
+      const knownContact = await Contact.findOne({
+        tenantId,
+        channelId,
+        aliases: remoteJid,
+      }).select('jid');
+
+      if (knownContact?.jid) {
+        remoteJid = knownContact.jid;
+      }
+    }
+
+    const fromMe =
+      msg.key.fromMe === true;
+
+    const actualSender =
+      msg.key?.participant ||
+      msg.key?.remoteJid ||
+      '';
+
+    const timestamp =
+      msg.messageTimestamp
+        ? new Date(
+            Number(msg.messageTimestamp) * 1000
+          )
+        : new Date();
+
+    // Ignore control/system traffic.
+    if (
+      !remoteJid ||
+      remoteJid === 'status@broadcast' ||
+      msg.message?.protocolMessage ||
+      msg.message?.senderKeyDistributionMessage
+    ) {
+      return;
+    }
+
+    const messageContent =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption ||
+      msg.message?.documentMessage?.caption ||
+      '';
+
+    const messageType =
+      msg.message?.imageMessage
+        ? 'image'
+        : msg.message?.videoMessage
+          ? 'video'
+          : msg.message?.audioMessage
+            ? 'audio'
+            : msg.message?.documentMessage
+              ? 'document'
+              : msg.message?.stickerMessage
+                ? 'sticker'
+                : 'text';
 
     try {
       const result = await saveMessage({
-        messageId: id || uuid.v4(),
+        messageId,
         tenantId,
         channelId,
         remoteJid: String(remoteJid),
@@ -71,65 +153,166 @@ const initSocket = (server) => {
         messageType,
         fromMe,
         timestamp,
-        participants: [String(msg.key?.participant || remoteJid)],
+        participants: [
+          String(
+            msg.key?.participant ||
+            remoteJid
+          ),
+        ],
       });
+
       const saved = result.message;
 
-      // Broadcast even for a retry: the client-side message id de-duplicates
-      // it, and a temporarily disconnected browser can still recover it.
-      const conversationKey = buildConversationKey(channelId, String(remoteJid));
-      io.to(`tenant:${tenantId}`).emit('new_message', {
-        remoteJid: String(remoteJid),
-        conversationKey,
-        message: saved,
-      });
-    
-    // Trigger Workflow Engine
-    const { processEvent } = require('../services/workflowEngine');
-      if (!fromMe && result.created) {
-        const contact = await Contact.findOne({ tenantId, jid: String(remoteJid) }).select('_id');
-        await processEvent(tenantId, 'message_received', {
-          tenantId,
+      /*
+       * This is the ONLY identity the frontend should use:
+       *
+       * channelId + remoteJid
+       *
+       * Never use JID alone.
+       */
+      const conversationKey =
+        buildConversationKey(
           channelId,
+          String(remoteJid)
+        );
+
+      io.to(`tenant:${tenantId}`).emit(
+        'new_message',
+        {
           remoteJid: String(remoteJid),
-          contactId: contact?._id || null,
-          message: messageContent,
-          isFirstMessage: !contact
-        });
+          channelId,
+          conversationKey,
+          message: saved,
+        }
+      );
+
+      const {
+        processEvent,
+      } = require('../services/workflowEngine');
+
+      if (!fromMe && result.created) {
+        const contact =
+          await Contact.findOne({
+            tenantId,
+            channelId,
+            jid: String(remoteJid),
+          }).select('_id');
+
+        await processEvent(
+          tenantId,
+          'message_received',
+          {
+            tenantId,
+            channelId,
+            remoteJid: String(remoteJid),
+            contactId:
+              contact?._id || null,
+            message: messageContent,
+            isFirstMessage: !contact,
+          }
+        );
       }
     } catch (error) {
-      // Never let one malformed/replayed event stop processing later messages.
-      console.error(`[Socket] Could not persist message ${id || 'unknown'}:`, error.message);
+      console.error(
+        `[Socket] Could not persist message ${messageId}:`,
+        error.message
+      );
     }
   });
 
-  setGlobalQRHandler(async ({ tenantId, channelId, qr }) => {
-    // Send QR only to users of this tenant
-    io.to(`tenant:${tenantId}`).emit('qr_code', qr);
-  });
+  setGlobalQRHandler(
+    async ({
+      tenantId,
+      channelId,
+      qr,
+    }) => {
+      io.to(`tenant:${tenantId}`).emit(
+        'qr_code',
+        qr
+      );
+    }
+  );
 
   io.on('connection', async (socket) => {
-    console.log(`Client connected: ${socket.id}, Tenant: ${socket.user.tenantId}`);
-    
-    // Join tenant room to receive tenant-specific events
-    socket.join(`tenant:${socket.user.tenantId}`);
+    const tenantId =
+      socket.user.tenantId;
 
-    socket.on('join_chat', async ({ jid, channelId } = {}) => {
-      if (!jid) return;
-      const conversationKey = buildConversationKey(channelId, jid);
-      await markAsRead(socket.user.tenantId, jid, channelId);
-      socket.join(`chat:${conversationKey}`);
-      socket.emit('messages_marked_read', { jid, channelId, conversationKey });
-    });
+    console.log(
+      `Client connected: ${socket.id}, Tenant: ${tenantId}`
+    );
 
-    socket.on('leave_chat', ({ jid, channelId } = {}) => {
-      if (!jid) return;
-      socket.leave(`chat:${buildConversationKey(channelId, jid)}`);
-    });
+    socket.join(
+      `tenant:${tenantId}`
+    );
 
-    socket.on('disconnect', async () => {
-      console.log(`Client disconnected: ${socket.id}`);
-    });
+    socket.on(
+      'join_chat',
+      async ({
+        jid,
+        channelId,
+      } = {}) => {
+        if (!jid || !channelId) {
+          return;
+        }
+
+        const conversationKey =
+          buildConversationKey(
+            channelId,
+            jid
+          );
+
+        await markAsRead(
+          tenantId,
+          jid,
+          channelId
+        );
+
+        const room =
+          `chat:${conversationKey}`;
+
+        socket.join(room);
+
+        socket.emit(
+          'messages_marked_read',
+          {
+            jid,
+            channelId,
+            conversationKey,
+          }
+        );
+      }
+    );
+
+    socket.on(
+      'leave_chat',
+      ({
+        jid,
+        channelId,
+      } = {}) => {
+        if (!jid || !channelId) {
+          return;
+        }
+
+        const conversationKey =
+          buildConversationKey(
+            channelId,
+            jid
+          );
+
+        socket.leave(
+          `chat:${conversationKey}`
+        );
+      }
+    );
+
+    socket.on(
+      'disconnect',
+      async () => {
+        console.log(
+          `Client disconnected: ${socket.id}`
+        );
+      }
+    );
   });
 
   return io;

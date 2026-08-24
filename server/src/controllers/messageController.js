@@ -1,99 +1,237 @@
 const ChatMessage = require('../models/ChatMessage');
 const Contact = require('../models/Contact');
-const { updateConversationFromMessage } = require('./conversationController');
+const Conversation = require('../models/Conversation');
+const {
+  updateConversationFromMessage,
+} = require('./conversationController');
 
 const getMessages = async (remoteJid, limit = 50, before) => {
-  const query = { remoteJid };
-  if (before) query.timestamp = { $lt: new Date(before) };
+  const query = {
+    remoteJid,
+  };
+
+  if (before) {
+    query.timestamp = {
+      $lt: new Date(before),
+    };
+  }
 
   const messages = await ChatMessage.find(query)
-    .sort({ timestamp: -1 })
+    .sort({
+      timestamp: -1,
+    })
     .limit(limit);
 
   return messages.reverse();
 };
 
-const getMessagesForTenant = async (tenantId, remoteJid, limit = 50, before, channelId) => {
-  const query = { tenantId, remoteJid };
-  if (channelId) query.channelId = channelId;
-  if (before) query.timestamp = { $lt: new Date(before) };
+const getMessagesForTenant = async (
+  tenantId,
+  remoteJid,
+  limit = 50,
+  before,
+  channelId
+) => {
+  const query = {
+    tenantId,
+    remoteJid,
+  };
+
+  // Conversation/message reads should normally always provide channelId.
+  if (channelId) {
+    query.channelId = channelId;
+  }
+
+  if (before) {
+    query.timestamp = {
+      $lt: new Date(before),
+    };
+  }
 
   const messages = await ChatMessage.find(query)
-    .sort({ timestamp: -1 })
+    .sort({
+      timestamp: -1,
+    })
     .limit(limit);
 
   return messages.reverse();
 };
 
 const saveMessage = async (data) => {
+  if (
+    !data?.tenantId ||
+    !data?.channelId ||
+    !data?.remoteJid ||
+    !data?.messageId
+  ) {
+    throw new Error(
+      'tenantId, channelId, remoteJid and messageId are required'
+    );
+  }
+
   const filter = {
     tenantId: data.tenantId,
     channelId: data.channelId,
     messageId: data.messageId,
   };
 
-  // Baileys can deliver the same event through history, append and notify.
-  // Upsert it once so a replay never prevents the socket event from reaching
-  // the CRM UI.
+  // Idempotency check.
   const existing = await ChatMessage.findOne(filter);
-  if (existing) return { message: existing, created: false };
+
+  if (existing) {
+    return {
+      message: existing,
+      created: false,
+    };
+  }
 
   let saved;
+
   try {
     saved = await ChatMessage.create(data);
   } catch (error) {
-    // Concurrent notify/append handlers may race between the read above and
-    // the insert. The unique index is the final idempotency guard.
+    // Unique MongoDB index protects against concurrent duplicate inserts.
     if (error.code === 11000) {
       const duplicate = await ChatMessage.findOne(filter);
-      if (duplicate) return { message: duplicate, created: false };
+
+      if (duplicate) {
+        return {
+          message: duplicate,
+          created: false,
+        };
+      }
     }
+
     throw error;
   }
 
+  const contactUpdate = {
+    tenantId: data.tenantId,
+    channelId: data.channelId,
+    jid: data.remoteJid,
+    lastMessage:
+      data.content ||
+      data.caption ||
+      '',
+    lastMessageTime:
+      data.timestamp ||
+      new Date(),
+  };
+
+  if (!data.fromMe) {
+    contactUpdate.$inc = {
+      unreadCount: 1,
+    };
+  }
+
   await Contact.findOneAndUpdate(
-    { tenantId: data.tenantId, channelId: data.channelId, jid: data.remoteJid },
     {
       tenantId: data.tenantId,
       channelId: data.channelId,
       jid: data.remoteJid,
-      lastMessage: data.content || (data.caption || ''),
-      lastMessageTime: data.timestamp || new Date(),
-      ...(data.fromMe ? {} : { $inc: { unreadCount: 1 } }),
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    contactUpdate,
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    }
   );
 
   await updateConversationFromMessage({
     tenantId: data.tenantId,
     channelId: data.channelId,
     remoteJid: data.remoteJid,
-    content: data.content || data.caption || '',
-    timestamp: data.timestamp || new Date(),
+    content:
+      data.content ||
+      data.caption ||
+      '',
+    timestamp:
+      data.timestamp ||
+      new Date(),
     fromMe: data.fromMe,
   });
 
-  return { message: saved, created: true };
+  return {
+    message: saved,
+    created: true,
+  };
 };
 
-const markAsRead = async (tenantId, remoteJid, channelId) => {
-  const query = { tenantId, remoteJid, read: false };
-  if (channelId) query.channelId = channelId;
+const markAsRead = async (
+  tenantId,
+  remoteJid,
+  channelId
+) => {
+  if (!tenantId || !remoteJid || !channelId) {
+    return;
+  }
 
-  await ChatMessage.updateMany(query, { read: true, updatedAt: new Date() });
-  const contactQuery = { tenantId, jid: remoteJid };
-  if (channelId) contactQuery.channelId = channelId;
+  // Mark only this channel's messages as read.
+  await ChatMessage.updateMany(
+    {
+      tenantId,
+      channelId,
+      remoteJid,
+      read: false,
+    },
+    {
+      $set: {
+        read: true,
+        updatedAt: new Date(),
+      },
+    }
+  );
 
-  await Contact.findOneAndUpdate(contactQuery, { unreadCount: 0 });
+  await Contact.findOneAndUpdate(
+    {
+      tenantId,
+      channelId,
+      jid: remoteJid,
+    },
+    {
+      $set: {
+        unreadCount: 0,
+      },
+    }
+  );
+
+  // IMPORTANT:
+  // Conversation unread count must also be reset.
+  await Conversation.findOneAndUpdate(
+    {
+      tenantId,
+      channelId,
+      contactJid: remoteJid,
+    },
+    {
+      $set: {
+        unreadCount: 0,
+      },
+    }
+  );
 };
 
-const getUnreadCount = async (tenantId, remoteJid) => {
-  const count = await ChatMessage.countDocuments({ tenantId, remoteJid, read: false });
-  return count;
+const getUnreadCount = async (
+  tenantId,
+  remoteJid,
+  channelId
+) => {
+  const query = {
+    tenantId,
+    remoteJid,
+    read: false,
+  };
+
+  if (channelId) {
+    query.channelId = channelId;
+  }
+
+  return ChatMessage.countDocuments(query);
 };
 
 const deleteMessage = async (messageId) => {
-  return await ChatMessage.findByIdAndDelete(messageId);
+  return ChatMessage.findByIdAndDelete(messageId);
 };
 
 module.exports = {

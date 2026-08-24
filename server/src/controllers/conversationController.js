@@ -2,107 +2,333 @@ const Conversation = require('../models/Conversation');
 const Contact = require('../models/Contact');
 const { buildConversationKey } = require('../utils/conversationKey');
 
-const ensureConversation = async ({ tenantId, channelId, contactId, contactJid, name, phone, isGroup = false }) => {
-  if (!tenantId || !channelId || !contactJid) return null;
+const resolveContactForConversation = async ({ tenantId, channelId, contactId, jid }) => {
+  if (!tenantId || !channelId) return null;
 
-  const normalizedJid = String(contactJid);
-  const conversation = await Conversation.findOneAndUpdate(
-    { tenantId, channelId, contactJid: normalizedJid },
-    {
+  if (contactId) {
+    return Contact.findOne({
+      _id: contactId,
       tenantId,
       channelId,
-      contactId: contactId || undefined,
-      contactJid: normalizedJid,
-      name: name || '',
-      phone: phone || '',
-      isGroup,
-      status: 'active',
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+    }).lean();
+  }
 
-  return conversation;
+  if (jid) {
+    return Contact.findOne({
+      tenantId,
+      channelId,
+      jid: String(jid),
+    }).lean();
+  }
+
+  return null;
+};
+
+const ensureConversation = async ({
+  tenantId,
+  channelId,
+  contactId,
+  contactJid,
+  name,
+  phone,
+  isGroup = false,
+}) => {
+  if (!tenantId || !channelId || !contactJid) {
+    return null;
+  }
+
+  const normalizedJid = String(contactJid);
+
+  const update = {
+    $setOnInsert: {
+      tenantId,
+      channelId,
+      contactJid: normalizedJid,
+      status: 'open',
+      unreadCount: 0,
+      lastMessage: '',
+      lastMessageTime: new Date(),
+      isGroup: Boolean(isGroup),
+    },
+    $set: {
+      status: 'active',
+      isGroup: Boolean(isGroup),
+    },
+  };
+
+  if (contactId) {
+    update.$set.contactId = contactId;
+  }
+
+  if (name) {
+    update.$set.name = String(name);
+  }
+
+  if (phone) {
+    update.$set.phone = String(phone);
+  }
+
+  try {
+    return await Conversation.findOneAndUpdate(
+      {
+        tenantId,
+        channelId,
+        contactJid: normalizedJid,
+      },
+      update,
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+  } catch (error) {
+    // Another request may have created the same conversation concurrently.
+    if (error.code === 11000) {
+      const existing = await Conversation.findOne({
+        tenantId,
+        channelId,
+        contactJid: normalizedJid,
+      });
+
+      if (existing) {
+        return existing;
+      }
+    }
+
+    throw error;
+  }
 };
 
 const getConversations = async (tenantId) => {
-  const conversations = await Conversation.find({ tenantId }).sort({ lastMessageTime: -1 }).limit(200);
+  if (!tenantId) return [];
+
+  const conversations = await Conversation.find({
+    tenantId,
+  })
+    .sort({
+      lastMessageTime: -1,
+    })
+    .limit(200)
+    .lean();
 
   return conversations.map((conversation) => ({
     conversationId: conversation.conversationId,
     tenantId: conversation.tenantId,
     channelId: conversation.channelId,
-    contactId: conversation.contactId,
+    contactId: conversation.contactId || null,
+
     jid: conversation.contactJid,
     contactJid: conversation.contactJid,
-    name: conversation.name,
-    phone: conversation.phone,
+
+    name: conversation.name || '',
+    phone: conversation.phone || '',
+
     status: conversation.status,
-    isGroup: conversation.isGroup,
-    unreadCount: conversation.unreadCount,
-    lastMessage: conversation.lastMessage,
+    isGroup: Boolean(conversation.isGroup),
+
+    unreadCount: Number(conversation.unreadCount || 0),
+
+    lastMessage: conversation.lastMessage || '',
     lastMessageTime: conversation.lastMessageTime,
-    conversationKey: buildConversationKey(conversation.channelId, conversation.contactJid),
+
+    conversationKey: buildConversationKey(
+      conversation.channelId,
+      conversation.contactJid
+    ),
   }));
 };
 
 const openConversation = async (req, res) => {
   try {
-    const { channelId, contactId, jid, name, phone } = req.body;
+    const tenantId = req.user.tenantId;
 
-    if (!channelId || (!contactId && !jid)) {
-      return res.status(400).json({ success: false, message: 'channelId and contact are required' });
+    const {
+      channelId,
+      contactId,
+      jid,
+      name,
+      phone,
+    } = req.body;
+
+    if (!tenantId || !channelId || (!contactId && !jid)) {
+      return res.status(400).json({
+        success: false,
+        message: 'channelId and contact are required',
+      });
     }
 
-    const contact = contactId
-      ? await Contact.findOne({ _id: contactId, tenantId: req.user.tenantId }).lean()
-      : await Contact.findOne({ tenantId: req.user.tenantId, channelId, jid }).lean();
+    // IMPORTANT:
+    // A contact must belong to the same tenant AND the same channel.
+    const contact = await resolveContactForConversation({
+      tenantId,
+      channelId,
+      contactId,
+      jid,
+    });
 
-    const contactJid = jid || contact?.jid;
-    if (!contactJid) {
-      return res.status(400).json({ success: false, message: 'Contact was not found for this channel' });
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact was not found for this channel',
+      });
     }
 
     const conversation = await ensureConversation({
-      tenantId: req.user.tenantId,
+      tenantId,
       channelId,
-      contactId: contact?._id || contactId,
-      contactJid: contactJid,
-      name: name || contact?.name || contact?.pushName || contact?.phone || '',
-      phone: phone || contact?.phone || '',
+      contactId: contact._id,
+      contactJid: contact.jid,
+      name:
+        name ||
+        contact.name ||
+        contact.pushName ||
+        contact.businessName ||
+        contact.phone ||
+        '',
+      phone: phone || contact.phone || '',
+      isGroup: contact.isGroup,
     });
 
-    res.json({ success: true, data: conversation });
+    if (!conversation) {
+      return res.status(500).json({
+        success: false,
+        message: 'Could not create conversation',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        conversationId: conversation.conversationId,
+        tenantId: conversation.tenantId,
+        channelId: conversation.channelId,
+        contactId: conversation.contactId,
+        jid: conversation.contactJid,
+        contactJid: conversation.contactJid,
+        name: conversation.name || '',
+        phone: conversation.phone || '',
+        status: conversation.status,
+        isGroup: Boolean(conversation.isGroup),
+        unreadCount: Number(conversation.unreadCount || 0),
+        lastMessage: conversation.lastMessage || '',
+        lastMessageTime: conversation.lastMessageTime,
+        conversationKey: buildConversationKey(
+          conversation.channelId,
+          conversation.contactJid
+        ),
+      },
+    });
   } catch (error) {
     console.error('Error opening conversation:', error);
-    res.status(500).json({ success: false, message: error.message });
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
-const updateConversationFromMessage = async ({ tenantId, channelId, remoteJid, content, timestamp, fromMe }) => {
-  if (!tenantId || !channelId || !remoteJid) return null;
+const updateConversationFromMessage = async ({
+  tenantId,
+  channelId,
+  remoteJid,
+  content,
+  timestamp,
+  fromMe,
+}) => {
+  if (!tenantId || !channelId || !remoteJid) {
+    return null;
+  }
 
-  const contact = await Contact.findOne({ tenantId, channelId, jid: remoteJid }).lean();
-  const existing = await Conversation.findOne({ tenantId, channelId, contactJid: remoteJid }).lean();
-  const unreadCount = fromMe ? 0 : (Number(existing?.unreadCount || 0) + 1);
+  const normalizedJid = String(remoteJid);
 
-  const conversation = await Conversation.findOneAndUpdate(
-    { tenantId, channelId, contactJid: remoteJid },
-    {
+  const contact = await Contact.findOne({
+    tenantId,
+    channelId,
+    jid: normalizedJid,
+  }).lean();
+
+  const existing = await Conversation.findOne({
+    tenantId,
+    channelId,
+    contactJid: normalizedJid,
+  }).lean();
+
+  const update = {
+    $setOnInsert: {
       tenantId,
       channelId,
-      contactId: contact?._id,
-      contactJid: remoteJid,
-      name: contact?.name || contact?.pushName || contact?.phone || '',
-      phone: contact?.phone || '',
+      contactJid: normalizedJid,
+      status: 'active',
+      unreadCount: 0,
+      isGroup: Boolean(contact?.isGroup),
+    },
+    $set: {
+      status: 'active',
       lastMessage: content || '',
       lastMessageTime: timestamp || new Date(),
-      unreadCount,
-      status: 'active',
+      isGroup: Boolean(contact?.isGroup),
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  };
 
-  return conversation;
+  if (contact?._id) {
+    update.$set.contactId = contact._id;
+  }
+
+  // Do not erase a valid existing name/phone with an empty value.
+  const contactName =
+    contact?.name ||
+    contact?.pushName ||
+    contact?.businessName ||
+    '';
+
+  if (contactName) {
+    update.$set.name = contactName;
+  }
+
+  if (contact?.phone) {
+    update.$set.phone = contact.phone;
+  }
+
+  if (fromMe) {
+    update.$set.unreadCount = 0;
+  } else if (existing) {
+    update.$inc = {
+      unreadCount: 1,
+    };
+  } else {
+    // New inbound conversation.
+    update.$set.unreadCount = 1;
+  }
+
+  try {
+    const conversation = await Conversation.findOneAndUpdate(
+      {
+        tenantId,
+        channelId,
+        contactJid: normalizedJid,
+      },
+      update,
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    return conversation;
+  } catch (error) {
+    if (error.code === 11000) {
+      return Conversation.findOne({
+        tenantId,
+        channelId,
+        contactJid: normalizedJid,
+      });
+    }
+
+    throw error;
+  }
 };
 
 module.exports = {

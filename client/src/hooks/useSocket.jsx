@@ -1,65 +1,169 @@
-import { io } from 'socket.io-client';
-import { useContext, createContext, useEffect, useState, useCallback } from 'react';
+import {
+  io,
+} from 'socket.io-client';
 
-const SocketContext = createContext(null);
+import {
+  useContext,
+  createContext,
+  useEffect,
+  useState,
+  useCallback,
+} from 'react';
+
+const SocketContext =
+  createContext(null);
 
 export const useSocket = () => {
-  const context = useContext(SocketContext);
-  if (!context) throw new Error('useSocket must be used within SocketProvider');
+  const context =
+    useContext(SocketContext);
+
+  if (!context) {
+    throw new Error(
+      'useSocket must be used within SocketProvider'
+    );
+  }
+
   return context;
 };
 
-export const SocketProvider = ({ children }) => {
-  const [socket, setSocket] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [newMessages, setNewMessages] = useState({});
-  const [qrCode, setQrCode] = useState(null);
-  const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
+export const SocketProvider = ({
+  children,
+}) => {
+  const [socket, setSocket] =
+    useState(null);
+
+  const [isConnected, setIsConnected] =
+    useState(false);
+
+  const [newMessages, setNewMessages] =
+    useState({});
+
+  const [qrCode, setQrCode] =
+    useState(null);
+
+  const [whatsappStatus, setWhatsappStatus] =
+    useState('disconnected');
 
   useEffect(() => {
-    const token = localStorage.getItem('crm_token');
-    if (!token) return;
+    const token =
+      localStorage.getItem('crm_token');
 
-    const newSocket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000', {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    if (!token) {
+      return;
+    }
 
-    newSocket.on('connect', () => {
-      setIsConnected(true);
-      console.log('Socket connected');
-    });
+    const newSocket = io(
+      import.meta.env.VITE_SOCKET_URL ||
+        'http://localhost:5000',
+      {
+        auth: {
+          token,
+        },
+        transports: [
+          'websocket',
+          'polling',
+        ],
+      }
+    );
 
-    newSocket.on('disconnect', () => {
-      setIsConnected(false);
-    });
+    newSocket.on(
+      'connect',
+      () => {
+        setIsConnected(true);
+        console.log(
+          'Socket connected'
+        );
+      }
+    );
 
-    newSocket.on('qr_code', (qr) => {
-      console.log('Received QR Code from server');
-      setQrCode(qr);
-    });
+    newSocket.on(
+      'disconnect',
+      () => {
+        setIsConnected(false);
+      }
+    );
 
-    newSocket.on('new_message', ({ remoteJid, conversationKey, message }) => {
-      const key = conversationKey || remoteJid;
-      setNewMessages(prev => ({
-        ...prev,
-        [key]: [...(prev[key] || []), message],
-      }));
-    });
+    newSocket.on(
+      'qr_code',
+      (qr) => {
+        console.log(
+          'Received QR Code from server'
+        );
 
-    newSocket.on('contacts_updated', (updates) => {
-      console.log('Contacts updated:', updates);
-    });
+        setQrCode(qr);
+      }
+    );
 
-    newSocket.on('messages_marked_read', ({ jid }) => {
-      setNewMessages(prev => {
-        const updated = { ...prev };
-        if (updated[jid]) {
-          updated[jid] = updated[jid].map(m => ({ ...m, read: true }));
+    newSocket.on(
+      'new_message',
+      ({
+        conversationKey,
+        message,
+      }) => {
+        /*
+         * IMPORTANT:
+         * We ONLY store messages under conversationKey.
+         *
+         * Never fall back to remoteJid.
+         */
+        if (!conversationKey) {
+          return;
         }
-        return updated;
-      });
-    });
+
+        setNewMessages(
+          (prev) => ({
+            ...prev,
+            [conversationKey]: [
+              ...(prev[conversationKey] || []),
+              message,
+            ],
+          })
+        );
+      }
+    );
+
+    newSocket.on(
+      'contacts_updated',
+      (updates) => {
+        console.log(
+          'Contacts updated:',
+          updates
+        );
+      }
+    );
+
+    newSocket.on(
+      'messages_marked_read',
+      ({
+        conversationKey,
+      }) => {
+        if (!conversationKey) {
+          return;
+        }
+
+        setNewMessages(
+          (prev) => {
+            const messages =
+              prev[conversationKey];
+
+            if (!messages) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              [conversationKey]:
+                messages.map(
+                  (message) => ({
+                    ...message,
+                    read: true,
+                  })
+                ),
+            };
+          }
+        );
+      }
+    );
 
     setSocket(newSocket);
 
@@ -68,25 +172,53 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
-  const joinChat = useCallback((jid, channelId) => {
-    socket?.emit('join_chat', { jid, channelId });
-  }, [socket]);
+  const joinChat = useCallback(
+    (jid, channelId) => {
+      if (!socket || !jid || !channelId) {
+        return;
+      }
 
-  const leaveChat = useCallback((jid, channelId) => {
-    socket?.emit('leave_chat', { jid, channelId });
-  }, [socket]);
+      socket.emit(
+        'join_chat',
+        {
+          jid,
+          channelId,
+        }
+      );
+    },
+    [socket]
+  );
+
+  const leaveChat = useCallback(
+    (jid, channelId) => {
+      if (!socket || !jid || !channelId) {
+        return;
+      }
+
+      socket.emit(
+        'leave_chat',
+        {
+          jid,
+          channelId,
+        }
+      );
+    },
+    [socket]
+  );
 
   return (
-    <SocketContext.Provider value={{
-      socket,
-      isConnected,
-      newMessages,
-      qrCode,
-      whatsappStatus,
-      setWhatsappStatus,
-      joinChat,
-      leaveChat,
-    }}>
+    <SocketContext.Provider
+      value={{
+        socket,
+        isConnected,
+        newMessages,
+        qrCode,
+        whatsappStatus,
+        setWhatsappStatus,
+        joinChat,
+        leaveChat,
+      }}
+    >
       {children}
     </SocketContext.Provider>
   );
