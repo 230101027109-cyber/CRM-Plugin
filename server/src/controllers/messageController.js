@@ -1,13 +1,13 @@
 const ChatMessage = require('../models/ChatMessage');
 const Contact = require('../models/Contact');
 const Conversation = require('../models/Conversation');
-const {
-  updateConversationFromMessage,
-} = require('./conversationController');
+const { updateConversationFromMessage } = require('./conversationController');
 
-const getMessages = async (remoteJid, limit = 50, before) => {
+const getMessages = async (remoteJid, limit = 50, before, tenantId, channelId) => {
   const query = {
     remoteJid,
+    tenantId,
+    channelId,
   };
 
   if (before) {
@@ -17,9 +17,7 @@ const getMessages = async (remoteJid, limit = 50, before) => {
   }
 
   const messages = await ChatMessage.find(query)
-    .sort({
-      timestamp: -1,
-    })
+    .sort({ timestamp: -1 })
     .limit(limit);
 
   return messages.reverse();
@@ -32,15 +30,15 @@ const getMessagesForTenant = async (
   before,
   channelId
 ) => {
+  if (!tenantId || !remoteJid || !channelId) {
+    throw new Error('tenantId, remoteJid and channelId are required');
+  }
+
   const query = {
     tenantId,
+    channelId,
     remoteJid,
   };
-
-  // Conversation/message reads should normally always provide channelId.
-  if (channelId) {
-    query.channelId = channelId;
-  }
 
   if (before) {
     query.timestamp = {
@@ -49,9 +47,7 @@ const getMessagesForTenant = async (
   }
 
   const messages = await ChatMessage.find(query)
-    .sort({
-      timestamp: -1,
-    })
+    .sort({ timestamp: -1 })
     .limit(limit);
 
   return messages.reverse();
@@ -75,7 +71,6 @@ const saveMessage = async (data) => {
     messageId: data.messageId,
   };
 
-  // Idempotency check.
   const existing = await ChatMessage.findOne(filter);
 
   if (existing) {
@@ -90,7 +85,6 @@ const saveMessage = async (data) => {
   try {
     saved = await ChatMessage.create(data);
   } catch (error) {
-    // Unique MongoDB index protects against concurrent duplicate inserts.
     if (error.code === 11000) {
       const duplicate = await ChatMessage.findOne(filter);
 
@@ -149,7 +143,7 @@ const saveMessage = async (data) => {
     timestamp:
       data.timestamp ||
       new Date(),
-    fromMe: data.fromMe,
+    fromMe: Boolean(data.fromMe),
   });
 
   return {
@@ -167,7 +161,6 @@ const markAsRead = async (
     return;
   }
 
-  // Mark only this channel's messages as read.
   await ChatMessage.updateMany(
     {
       tenantId,
@@ -196,8 +189,6 @@ const markAsRead = async (
     }
   );
 
-  // IMPORTANT:
-  // Conversation unread count must also be reset.
   await Conversation.findOneAndUpdate(
     {
       tenantId,
@@ -223,9 +214,7 @@ const getUnreadCount = async (
     read: false,
   };
 
-  if (channelId) {
-    query.channelId = channelId;
-  }
+  if (channelId) query.channelId = channelId;
 
   return ChatMessage.countDocuments(query);
 };

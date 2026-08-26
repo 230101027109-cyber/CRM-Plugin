@@ -178,25 +178,26 @@ const setRedisHash = async (key, field, value) => {
 };
 
 const getChatList = async (tenantId) => {
-  const contacts = await Contact.find(
-    { tenantId },
-    'jid name phone pushName isGroup channelId lastMessage lastMessageTime isOnline unreadCount profilePicUrl'
-  )
+  const conversations = await Conversation.find({ tenantId })
     .sort({ lastMessageTime: -1 })
-    .limit(100);
+    .limit(100)
+    .lean();
 
-  return contacts.map(contact => ({
-    jid: contact.jid,
-    name: contact.name || contact.pushName || contact.phone,
-    phone: contact.phone,
-    isGroup: contact.isGroup,
-    channelId: contact.channelId,
-    conversationKey: buildConversationKey(contact.channelId, contact.jid),
-    isOnline: contact.isOnline,
-    lastMessage: contact.lastMessage,
-    lastMessageTime: contact.lastMessageTime,
-    unreadCount: contact.unreadCount,
-    profilePicUrl: contact.profilePicUrl,
+  return conversations.map((conversation) => ({
+    conversationId: conversation.conversationId,
+    contactId: conversation.contactId || null,
+    jid: conversation.contactJid,
+    name: conversation.name || conversation.phone || conversation.contactJid,
+    phone: conversation.phone || '',
+    isGroup: Boolean(conversation.isGroup),
+    channelId: conversation.channelId,
+    conversationKey: buildConversationKey(
+      conversation.channelId,
+      conversation.contactJid
+    ),
+    lastMessage: conversation.lastMessage || '',
+    lastMessageTime: conversation.lastMessageTime,
+    unreadCount: Number(conversation.unreadCount || 0),
   }));
 };
 
@@ -525,46 +526,121 @@ const createOrUpdateContact = async (tenantId, data) => {
   );
 };
 
-const mergeContactIdentity = async ({ tenantId, channelId, lid, jid }) => {
-  if (!lid || !jid || lid === jid) return jid;
-  if (!tenantId || !channelId) throw new Error('tenantId and channelId are required');
+const mergeContactIdentity = async ({
+  tenantId,
+  channelId,
+  lid,
+  jid,
+}) => {
+  if (!tenantId || !channelId || !lid || !jid) {
+    return jid;
+  }
+
+  if (lid === jid) return jid;
 
   const phone = jid.split('@')[0].split(':')[0];
 
-  // Move message history from the private LID to the canonical phone JID.
+  // 1. Move historical messages from LID -> canonical phone JID.
   await ChatMessage.updateMany(
-    { tenantId, channelId, remoteJid: lid },
-    { $set: { remoteJid: jid } }
+    {
+      tenantId,
+      channelId,
+      remoteJid: lid,
+    },
+    {
+      $set: {
+        remoteJid: jid,
+      },
+    }
   );
 
+  // 2. Find both contact identities inside THIS tenant + channel only.
   const [phoneContact, lidContact] = await Promise.all([
-    Contact.findOne({ tenantId, channelId, jid }),
-    Contact.findOne({ tenantId, channelId, jid: lid }),
+    Contact.findOne({
+      tenantId,
+      channelId,
+      jid,
+    }),
+    Contact.findOne({
+      tenantId,
+      channelId,
+      jid: lid,
+    }),
   ]);
 
+  let canonicalContact;
+
   if (phoneContact) {
+    canonicalContact = phoneContact;
+
+    const aliasesToAdd = [
+      lid,
+      ...(lidContact?.aliases || []),
+    ].filter(Boolean);
+
     await Contact.updateOne(
       { _id: phoneContact._id },
       {
-        $addToSet: { aliases: lid },
-        $set: { channelId, phone },
+        $set: {
+          channelId,
+          phone,
+          ...(lidContact?.name && !phoneContact.name
+            ? { name: lidContact.name }
+            : {}),
+          ...(lidContact?.pushName && !phoneContact.pushName
+            ? { pushName: lidContact.pushName }
+            : {}),
+        },
+        $addToSet: {
+          aliases: {
+            $each: aliasesToAdd,
+          },
+        },
       }
     );
 
-    if (lidContact && String(lidContact._id) !== String(phoneContact._id)) {
-      await Contact.deleteOne({ _id: lidContact._id });
+    if (
+      lidContact &&
+      String(lidContact._id) !== String(phoneContact._id)
+    ) {
+      await Contact.deleteOne({
+        _id: lidContact._id,
+      });
     }
   } else if (lidContact) {
-    await Contact.updateOne(
-      { _id: lidContact._id },
+    const aliases = [
+      ...(lidContact.aliases || []),
+      lid,
+    ].filter(Boolean);
+
+    canonicalContact = await Contact.findOneAndUpdate(
       {
-        $set: { jid, phone, channelId },
-        $addToSet: { aliases: lid },
+        _id: lidContact._id,
+      },
+      {
+        $set: {
+          tenantId,
+          channelId,
+          jid,
+          phone,
+        },
+        $addToSet: {
+          aliases: {
+            $each: aliases,
+          },
+        },
+      },
+      {
+        new: true,
       }
     );
   } else {
-    await Contact.findOneAndUpdate(
-      { tenantId, channelId, jid },
+    canonicalContact = await Contact.findOneAndUpdate(
+      {
+        tenantId,
+        channelId,
+        jid,
+      },
       {
         $setOnInsert: {
           tenantId,
@@ -573,9 +649,103 @@ const mergeContactIdentity = async ({ tenantId, channelId, lid, jid }) => {
           phone,
           isGroup: false,
         },
-        $addToSet: { aliases: lid },
+        $addToSet: {
+          aliases: lid,
+        },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+  }
+
+  // 3. Merge conversations so only the canonical phone conversation remains.
+  const [phoneConversation, lidConversation] = await Promise.all([
+    Conversation.findOne({
+      tenantId,
+      channelId,
+      contactJid: jid,
+    }),
+    Conversation.findOne({
+      tenantId,
+      channelId,
+      contactJid: lid,
+    }),
+  ]);
+
+  if (
+    phoneConversation &&
+    lidConversation &&
+    String(phoneConversation._id) !== String(lidConversation._id)
+  ) {
+    const phoneLast = phoneConversation.lastMessageTime
+      ? new Date(phoneConversation.lastMessageTime).getTime()
+      : 0;
+    const lidLast = lidConversation.lastMessageTime
+      ? new Date(lidConversation.lastMessageTime).getTime()
+      : 0;
+
+    const latest = lidLast > phoneLast
+      ? lidConversation
+      : phoneConversation;
+
+    await Conversation.updateOne(
+      { _id: phoneConversation._id },
+      {
+        $set: {
+          contactId: canonicalContact?._id || phoneConversation.contactId,
+          contactJid: jid,
+          lastMessage: latest.lastMessage || '',
+          lastMessageTime:
+            latest.lastMessageTime ||
+            phoneConversation.lastMessageTime,
+          name:
+            phoneConversation.name ||
+            lidConversation.name ||
+            '',
+          phone:
+            phoneConversation.phone ||
+            lidConversation.phone ||
+            phone,
+          status:
+            phoneConversation.status === 'archived'
+              ? 'archived'
+              : latest.status || 'active',
+          unreadCount:
+            Number(phoneConversation.unreadCount || 0) +
+            Number(lidConversation.unreadCount || 0),
+        },
+      }
+    );
+
+    await Conversation.deleteOne({
+      _id: lidConversation._id,
+    });
+  } else if (lidConversation) {
+    await Conversation.updateOne(
+      { _id: lidConversation._id },
+      {
+        $set: {
+          tenantId,
+          channelId,
+          contactId: canonicalContact?._id,
+          contactJid: jid,
+          phone,
+        },
+      }
+    );
+  } else if (phoneConversation) {
+    await Conversation.updateOne(
+      { _id: phoneConversation._id },
+      {
+        $set: {
+          contactId: canonicalContact?._id,
+          contactJid: jid,
+          phone,
+        },
+      }
     );
   }
 

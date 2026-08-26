@@ -1,7 +1,6 @@
 import {
   io,
 } from 'socket.io-client';
-
 import {
   useContext,
   createContext,
@@ -10,12 +9,10 @@ import {
   useCallback,
 } from 'react';
 
-const SocketContext =
-  createContext(null);
+const SocketContext = createContext(null);
 
 export const useSocket = () => {
-  const context =
-    useContext(SocketContext);
+  const context = useContext(SocketContext);
 
   if (!context) {
     throw new Error(
@@ -26,142 +23,79 @@ export const useSocket = () => {
   return context;
 };
 
-export const SocketProvider = ({
-  children,
-}) => {
-  const [socket, setSocket] =
-    useState(null);
-
-  const [isConnected, setIsConnected] =
-    useState(false);
-
-  const [newMessages, setNewMessages] =
-    useState({});
-
-  const [qrCode, setQrCode] =
-    useState(null);
-
-  const [whatsappStatus, setWhatsappStatus] =
-    useState('disconnected');
+export const SocketProvider = ({ children }) => {
+  const [socket, setSocket] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [newMessages, setNewMessages] = useState({});
+  const [qrCode, setQrCode] = useState(null);
+  const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
 
   useEffect(() => {
-    const token =
-      localStorage.getItem('crm_token');
+    const token = localStorage.getItem('crm_token');
 
-    if (!token) {
-      return;
-    }
+    if (!token) return undefined;
 
     const newSocket = io(
-      import.meta.env.VITE_SOCKET_URL ||
-        'http://localhost:5000',
+      import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
       {
-        auth: {
-          token,
-        },
-        transports: [
-          'websocket',
-          'polling',
-        ],
+        auth: { token },
+        transports: ['websocket', 'polling'],
       }
     );
 
-    newSocket.on(
-      'connect',
-      () => {
-        setIsConnected(true);
-        console.log(
-          'Socket connected'
-        );
-      }
-    );
+    newSocket.on('connect', () => {
+      setIsConnected(true);
+    });
 
-    newSocket.on(
-      'disconnect',
-      () => {
-        setIsConnected(false);
-      }
-    );
+    newSocket.on('disconnect', () => {
+      setIsConnected(false);
+    });
 
-    newSocket.on(
-      'qr_code',
-      (qr) => {
-        console.log(
-          'Received QR Code from server'
-        );
-
-        setQrCode(qr);
-      }
-    );
+    newSocket.on('qr_code', (qr) => {
+      setQrCode(qr);
+    });
 
     newSocket.on(
       'new_message',
-      ({
-        conversationKey,
-        message,
-      }) => {
-        /*
-         * IMPORTANT:
-         * We ONLY store messages under conversationKey.
-         *
-         * Never fall back to remoteJid.
-         */
+      ({ conversationKey, channelId, remoteJid, message }) => {
         if (!conversationKey) {
           return;
         }
 
-        setNewMessages(
-          (prev) => ({
-            ...prev,
-            [conversationKey]: [
-              ...(prev[conversationKey] || []),
-              message,
-            ],
-          })
-        );
-      }
-    );
-
-    newSocket.on(
-      'contacts_updated',
-      (updates) => {
-        console.log(
-          'Contacts updated:',
-          updates
-        );
+        setNewMessages((previous) => ({
+          ...previous,
+          [conversationKey]: [
+            ...(previous[conversationKey] || []),
+            {
+              ...message,
+              channelId,
+              remoteJid,
+            },
+          ],
+        }));
       }
     );
 
     newSocket.on(
       'messages_marked_read',
-      ({
-        conversationKey,
-      }) => {
-        if (!conversationKey) {
-          return;
-        }
+      ({ conversationKey }) => {
+        if (!conversationKey) return;
 
-        setNewMessages(
-          (prev) => {
-            const messages =
-              prev[conversationKey];
+        setNewMessages((previous) => {
+          const messages = previous[conversationKey];
 
-            if (!messages) {
-              return prev;
-            }
-
-            return {
-              ...prev,
-              [conversationKey]:
-                messages.map(
-                  (message) => ({
-                    ...message,
-                    read: true,
-                  })
-                ),
-            };
+          if (!messages) {
+            return previous;
           }
-        );
+
+          return {
+            ...previous,
+            [conversationKey]: messages.map((message) => ({
+              ...message,
+              read: true,
+            })),
+          };
+        });
       }
     );
 
@@ -174,34 +108,24 @@ export const SocketProvider = ({
 
   const joinChat = useCallback(
     (jid, channelId) => {
-      if (!socket || !jid || !channelId) {
-        return;
-      }
+      if (!socket || !jid || !channelId) return;
 
-      socket.emit(
-        'join_chat',
-        {
-          jid,
-          channelId,
-        }
-      );
+      socket.emit('join_chat', {
+        jid,
+        channelId,
+      });
     },
     [socket]
   );
 
   const leaveChat = useCallback(
     (jid, channelId) => {
-      if (!socket || !jid || !channelId) {
-        return;
-      }
+      if (!socket || !jid || !channelId) return;
 
-      socket.emit(
-        'leave_chat',
-        {
-          jid,
-          channelId,
-        }
-      );
+      socket.emit('leave_chat', {
+        jid,
+        channelId,
+      });
     },
     [socket]
   );

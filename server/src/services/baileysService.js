@@ -196,17 +196,43 @@ const getCanonicalJid = (channelId, jid) => {
 
 const sendMessage = async (channelId, jid, content, options = {}) => {
   const sock = sessions.get(channelId);
-  if (!sock || !sock.user) return { success: false, error: 'WhatsApp not connected for this channel' };
+  if (!sock || !sock.user) {
+    return {
+      success: false,
+      error: 'WhatsApp not connected for this channel',
+    };
+  }
+
+  const targetJid = getCanonicalJid(channelId, jid);
+
+  if (!targetJid || targetJid.endsWith('@lid')) {
+    return {
+      success: false,
+      error: 'Could not resolve WhatsApp contact to a canonical JID',
+    };
+  }
 
   const messageOptions = {};
-  if (options.quotedMessageId) messageOptions.quoted = options.quotedMessageId;
+  if (options.quotedMessageId) {
+    messageOptions.quoted = options.quotedMessageId;
+  }
   if (options.caption && ['image', 'video', 'document'].includes(options.type)) {
     messageOptions.caption = options.caption;
   }
 
   try {
-    const result = await sock.sendMessage(jid, { text: content }, messageOptions);
-    return { success: true, messageId: result?.key?.id, timestamp: new Date() };
+    const result = await sock.sendMessage(
+      targetJid,
+      { text: content },
+      messageOptions
+    );
+
+    return {
+      success: true,
+      messageId: result?.key?.id,
+      timestamp: new Date(),
+      remoteJid: targetJid,
+    };
   } catch (error) {
     console.error(`Error sending message on channel ${channelId}:`, error.message);
     return { success: false, error: error.message };

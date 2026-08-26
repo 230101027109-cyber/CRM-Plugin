@@ -2,27 +2,7 @@ const Conversation = require('../models/Conversation');
 const Contact = require('../models/Contact');
 const { buildConversationKey } = require('../utils/conversationKey');
 
-const resolveContactForConversation = async ({ tenantId, channelId, contactId, jid }) => {
-  if (!tenantId || !channelId) return null;
-
-  if (contactId) {
-    return Contact.findOne({
-      _id: contactId,
-      tenantId,
-      channelId,
-    }).lean();
-  }
-
-  if (jid) {
-    return Contact.findOne({
-      tenantId,
-      channelId,
-      jid: String(jid),
-    }).lean();
-  }
-
-  return null;
-};
+const normalizeJid = (jid) => String(jid || '').trim();
 
 const ensureConversation = async ({
   tenantId,
@@ -33,11 +13,11 @@ const ensureConversation = async ({
   phone,
   isGroup = false,
 }) => {
-  if (!tenantId || !channelId || !contactJid) {
+  const normalizedJid = normalizeJid(contactJid);
+
+  if (!tenantId || !channelId || !normalizedJid) {
     return null;
   }
-
-  const normalizedJid = String(contactJid);
 
   const update = {
     $setOnInsert: {
@@ -56,17 +36,9 @@ const ensureConversation = async ({
     },
   };
 
-  if (contactId) {
-    update.$set.contactId = contactId;
-  }
-
-  if (name) {
-    update.$set.name = String(name);
-  }
-
-  if (phone) {
-    update.$set.phone = String(phone);
-  }
+  if (contactId) update.$set.contactId = contactId;
+  if (name) update.$set.name = String(name);
+  if (phone) update.$set.phone = String(phone);
 
   try {
     return await Conversation.findOneAndUpdate(
@@ -83,7 +55,6 @@ const ensureConversation = async ({
       }
     );
   } catch (error) {
-    // Another request may have created the same conversation concurrently.
     if (error.code === 11000) {
       const existing = await Conversation.findOne({
         tenantId,
@@ -91,9 +62,7 @@ const ensureConversation = async ({
         contactJid: normalizedJid,
       });
 
-      if (existing) {
-        return existing;
-      }
+      if (existing) return existing;
     }
 
     throw error;
@@ -101,14 +70,10 @@ const ensureConversation = async ({
 };
 
 const getConversations = async (tenantId) => {
-  if (!tenantId) return [];
-
   const conversations = await Conversation.find({
     tenantId,
   })
-    .sort({
-      lastMessageTime: -1,
-    })
+    .sort({ lastMessageTime: -1 })
     .limit(200)
     .lean();
 
@@ -117,21 +82,15 @@ const getConversations = async (tenantId) => {
     tenantId: conversation.tenantId,
     channelId: conversation.channelId,
     contactId: conversation.contactId || null,
-
     jid: conversation.contactJid,
     contactJid: conversation.contactJid,
-
     name: conversation.name || '',
     phone: conversation.phone || '',
-
     status: conversation.status,
     isGroup: Boolean(conversation.isGroup),
-
     unreadCount: Number(conversation.unreadCount || 0),
-
     lastMessage: conversation.lastMessage || '',
     lastMessageTime: conversation.lastMessageTime,
-
     conversationKey: buildConversationKey(
       conversation.channelId,
       conversation.contactJid
@@ -142,7 +101,6 @@ const getConversations = async (tenantId) => {
 const openConversation = async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
-
     const {
       channelId,
       contactId,
@@ -151,21 +109,24 @@ const openConversation = async (req, res) => {
       phone,
     } = req.body;
 
-    if (!tenantId || !channelId || (!contactId && !jid)) {
+    if (!channelId || (!contactId && !jid)) {
       return res.status(400).json({
         success: false,
         message: 'channelId and contact are required',
       });
     }
 
-    // IMPORTANT:
-    // A contact must belong to the same tenant AND the same channel.
-    const contact = await resolveContactForConversation({
-      tenantId,
-      channelId,
-      contactId,
-      jid,
-    });
+    const contact = contactId
+      ? await Contact.findOne({
+          _id: contactId,
+          tenantId,
+          channelId,
+        }).lean()
+      : await Contact.findOne({
+          tenantId,
+          channelId,
+          jid: normalizeJid(jid),
+        }).lean();
 
     if (!contact) {
       return res.status(404).json({
@@ -189,13 +150,6 @@ const openConversation = async (req, res) => {
       phone: phone || contact.phone || '',
       isGroup: contact.isGroup,
     });
-
-    if (!conversation) {
-      return res.status(500).json({
-        success: false,
-        message: 'Could not create conversation',
-      });
-    }
 
     res.json({
       success: true,
@@ -237,11 +191,11 @@ const updateConversationFromMessage = async ({
   timestamp,
   fromMe,
 }) => {
-  if (!tenantId || !channelId || !remoteJid) {
+  const normalizedJid = normalizeJid(remoteJid);
+
+  if (!tenantId || !channelId || !normalizedJid) {
     return null;
   }
-
-  const normalizedJid = String(remoteJid);
 
   const contact = await Contact.findOne({
     tenantId,
@@ -262,9 +216,14 @@ const updateConversationFromMessage = async ({
       contactJid: normalizedJid,
       status: 'active',
       unreadCount: 0,
+      lastMessage: '',
+      lastMessageTime: timestamp || new Date(),
       isGroup: Boolean(contact?.isGroup),
     },
     $set: {
+      tenantId,
+      channelId,
+      contactJid: normalizedJid,
       status: 'active',
       lastMessage: content || '',
       lastMessageTime: timestamp || new Date(),
@@ -276,7 +235,6 @@ const updateConversationFromMessage = async ({
     update.$set.contactId = contact._id;
   }
 
-  // Do not erase a valid existing name/phone with an empty value.
   const contactName =
     contact?.name ||
     contact?.pushName ||
@@ -298,12 +256,11 @@ const updateConversationFromMessage = async ({
       unreadCount: 1,
     };
   } else {
-    // New inbound conversation.
     update.$set.unreadCount = 1;
   }
 
   try {
-    const conversation = await Conversation.findOneAndUpdate(
+    return await Conversation.findOneAndUpdate(
       {
         tenantId,
         channelId,
@@ -316,8 +273,6 @@ const updateConversationFromMessage = async ({
         setDefaultsOnInsert: true,
       }
     );
-
-    return conversation;
   } catch (error) {
     if (error.code === 11000) {
       return Conversation.findOne({
