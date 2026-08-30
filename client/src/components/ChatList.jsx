@@ -4,7 +4,7 @@ import { contactsAPI, channelsAPI, conversationsAPI } from '../services/api';
 import { useSocket } from '../hooks/useSocket.jsx';
 import { useAuth } from '../hooks/useAuth.jsx';
 import moment from 'moment';
-import { Search, Plus, X } from 'lucide-react';
+import { Search, Plus, X, Trash2 } from 'lucide-react';
 
 const ChatList = ({ onSelectChat, activeChat }) => {
   const [chats, setChats] = useState([]);
@@ -210,6 +210,26 @@ const ChatList = ({ onSelectChat, activeChat }) => {
     }
   };
 
+  const handleDeleteConversation = async (event, chat) => {
+    event.stopPropagation();
+
+    if (!chat.conversationId) return;
+    if (!window.confirm(`Delete conversation ${chat.name || chat.phone || chat.jid}?`)) return;
+
+    try {
+      await conversationsAPI.delete(chat.conversationId);
+      setChats((currentChats) =>
+        currentChats.filter((item) => item.conversationId !== chat.conversationId)
+      );
+      if (activeChat?.conversationId === chat.conversationId) {
+        onSelectChat(null);
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      alert('Could not delete conversation.');
+    }
+  };
+
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       <div className="p-4 bg-gray-50 border-b">
@@ -314,11 +334,23 @@ const ChatList = ({ onSelectChat, activeChat }) => {
                       {chat.lastMessage || 'No messages'}
                     </p>
 
-                    {Number(chat.unreadCount || 0) > 0 && (
-                      <span className="ml-2 bg-green-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5 flex-shrink-0">
-                        {chat.unreadCount > 9 ? '9+' : chat.unreadCount}
-                      </span>
-                    )}
+                    <div className="ml-2 flex items-center gap-2 flex-shrink-0">
+                      {Number(chat.unreadCount || 0) > 0 && (
+                        <span className="bg-green-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5">
+                          {chat.unreadCount > 9 ? '9+' : chat.unreadCount}
+                        </span>
+                      )}
+                      {chat.conversationId && (
+                        <button
+                          type="button"
+                          onClick={(event) => handleDeleteConversation(event, chat)}
+                          className="p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          title="Delete conversation"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

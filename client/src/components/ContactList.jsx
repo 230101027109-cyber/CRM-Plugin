@@ -74,8 +74,13 @@ const ContactList = ({ onSelectContact }) => {
         alert('Connect at least one WhatsApp channel before creating a conversation.');
         return;
       }
-      setConversationChannelId(connectedChannels[0].channelId);
       const nextContact = contact || contacts[0] || null;
+      const contactChannel = nextContact?.channelId;
+      setConversationChannelId(
+        contactChannel && connectedChannels.some(channel => channel.channelId === contactChannel)
+          ? contactChannel
+          : connectedChannels[0].channelId
+      );
       setSelectedContactForConversation(nextContact);
       setSelectedContactJid(nextContact ? nextContact.jid : '');
       setShowConversationModal(true);
@@ -86,14 +91,14 @@ const ContactList = ({ onSelectContact }) => {
   };
 
   const handleCreateConversation = async () => {
-    const contact = contacts.find(c => c.jid === selectedContactJid) || selectedContactForConversation;
+    const contact = selectedContactForConversation;
     if (!contact) return;
     setStartingConversation(true);
     try {
       const conversationContact = {
         ...contact,
-        channelId: conversationChannelId,
-        conversationKey: `${conversationChannelId}::${contact.jid}`,
+        channelId: contact.channelId || conversationChannelId,
+        conversationKey: `${contact.channelId || conversationChannelId}::${contact.jid}`,
       };
       onSelectContact(conversationContact);
       setShowConversationModal(false);
@@ -206,7 +211,7 @@ const ContactList = ({ onSelectContact }) => {
         ) : (
           filteredContacts.map(contact => (
             <div
-              key={contact.jid}
+              key={`${contact.channelId}::${contact.jid}`}
               className="flex items-center p-3 border-b hover:bg-gray-50"
             >
               <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium flex-shrink-0">

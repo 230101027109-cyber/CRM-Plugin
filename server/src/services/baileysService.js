@@ -9,6 +9,8 @@ const stores = new Map(); // Map to store in-memory stores by channelId
 const qrs = new Map(); // Store latest QR codes by channelId
 const sessionHandlers = new Map(); // Handlers per channel
 const jidAliases = new Map(); // Map<channelId, Map<lidJid, phoneJid>>
+const retryCounts = new Map(); // Map to track reconnect attempts per channelId
+const MAX_RETRY_ATTEMPTS = 5;
 
 const sessionPath = path.resolve(process.env.STORE_PATH || path.join(__dirname, '../../data/baileys'));
 
@@ -19,9 +21,11 @@ if (!fs.existsSync(sessionPath)) {
 // Handlers that can be set externally (like from socket.io)
 let globalMessageHandler = null;
 let globalQRHandler = null;
+let globalLidMappingHandler = null;
 
 const setGlobalMessageHandler = (handler) => { globalMessageHandler = handler; };
 const setGlobalQRHandler = (handler) => { globalQRHandler = handler; };
+const setGlobalLidMappingHandler = (handler) => { globalLidMappingHandler = handler; };
 
 const startSession = async (channelId, sessionId, tenantId) => {
   if (sessions.has(channelId)) {
@@ -44,6 +48,10 @@ const startSession = async (channelId, sessionId, tenantId) => {
     printQRInTerminal: false,
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     defaultQueryTimeoutMs: undefined,
+    // This CRM intentionally imports contacts only on the explicit Sync
+    // action. Never request or process WhatsApp message history.
+    syncFullHistory: false,
+    shouldSyncHistoryMessage: () => false,
   });
 
   // Bind store to socket events so contacts/chats populate
@@ -72,14 +80,23 @@ const startSession = async (channelId, sessionId, tenantId) => {
       console.log(`[Baileys] Should reconnect: ${shouldReconnect}`);
       
       try {
-        if (shouldReconnect) {
+        const attempts = retryCounts.get(channelId) || 0;
+        if (shouldReconnect && attempts < MAX_RETRY_ATTEMPTS) {
+          retryCounts.set(channelId, attempts + 1);
+          const backoffDelay = Math.min(Math.pow(2, attempts) * 1000, 30000);
+          console.log(`[Baileys] Reconnecting channel ${channelId} in ${backoffDelay}ms (Attempt ${attempts + 1}/${MAX_RETRY_ATTEMPTS})`);
+
           sessions.delete(channelId);
           stores.delete(channelId);
           jidAliases.delete(channelId);
           setTimeout(() => {
             startSession(channelId, sessionId, tenantId);
-          }, 2000);
+          }, backoffDelay);
         } else {
+          if (attempts >= MAX_RETRY_ATTEMPTS) {
+            console.error(`[Baileys] Max reconnect attempts reached for channel ${channelId}. Stopping retries.`);
+          }
+          retryCounts.delete(channelId);
           sessions.delete(channelId);
           stores.delete(channelId);
           jidAliases.delete(channelId);
@@ -93,12 +110,13 @@ const startSession = async (channelId, sessionId, tenantId) => {
       }
     } else if (connection === 'open') {
       qrs.delete(channelId);
+      retryCounts.delete(channelId);
       console.log(`[Baileys] Connection OPEN for channel ${channelId}`);
       try {
         const userJid = sock.user?.wid || sock.user?.id || '';
-        await Channel.updateOne({ channelId }, { 
-          status: 'connected', 
-          connectedNumber: userJid.split(':')[0] 
+        await Channel.updateOne({ channelId }, {
+          status: 'connected',
+          connectedNumber: userJid.split(':')[0]
         });
         console.log(`[Baileys] Channel ${channelId} status updated to 'connected' in DB`);
       } catch (err) {
@@ -122,34 +140,26 @@ const startSession = async (channelId, sessionId, tenantId) => {
     } catch (error) {
       console.error(`[Baileys] Could not merge LID ${lid}:`, error.message);
     }
+
+    if (globalLidMappingHandler) {
+      try {
+        await globalLidMappingHandler({ tenantId, channelId, lid, jid });
+      } catch (error) {
+        console.error(`[Baileys] Could not replay messages for LID ${lid}:`, error.message);
+      }
+    }
   });
 
-  sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
-    console.log(`[Baileys] History set: ${chats.length} chats, ${contacts.length} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
-
-    // Persist history too. Without this, contact sync succeeds but the CRM
-    // chat window is empty until a brand-new message arrives.
-    if (globalMessageHandler && Array.isArray(messages)) {
-      for (const msg of messages) {
-        await globalMessageHandler({ tenantId, channelId, msg });
-      }
-    }
-
-    // Auto-sync contacts to DB when full history is loaded
-    if (isLatest && chats.length > 0) {
-      try {
-        const { syncContacts } = require('../controllers/contactController');
-        const store = stores.get(channelId);
-        const result = await syncContacts(sock, store, tenantId, channelId);
-        console.log(`[Baileys] Auto-synced after history: ${JSON.stringify(result)}`);
-      } catch (err) {
-        console.error('[Baileys] Auto-sync after history failed:', err.message);
-      }
-    }
+  sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+    // Bind the data to Baileys' in-memory store so the explicit contact-sync
+    // action can read contacts. Historical messages/chats are intentionally
+    // never imported into CRM storage.
+    console.log(`[Baileys] History received for contact sync only: ${chats.length} chats, ${contacts.length} contacts, ${messages?.length || 0} messages, isLatest=${isLatest}`);
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (!['notify', 'append'].includes(type) || !globalMessageHandler) return;
+    // `append` can be historical backfill. Persist only live notifications.
+    if (type !== 'notify' || !globalMessageHandler) return;
     for (const msg of messages) {
       try {
         await globalMessageHandler({ tenantId, channelId, msg });
@@ -250,4 +260,7 @@ module.exports = {
   sendMessage,
   setGlobalMessageHandler,
   setGlobalQRHandler,
+  setGlobalLidMappingHandler,
 };
+
+

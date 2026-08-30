@@ -40,11 +40,13 @@ export const whatsappAPI = {
 
 export const channelsAPI = {
   getAll: () => api.get('/channels'),
+  delete: (id) => api.delete(`/channels/${id}`),
 };
 
 export const conversationsAPI = {
   getAll: () => api.get('/conversations'),
   open: (payload) => api.post('/conversations/open', payload),
+  delete: (id) => api.delete(`/conversations/${id}`),
 };
 
 export const contactsAPI = {
@@ -54,8 +56,8 @@ export const contactsAPI = {
   search: (q) => api.get(`/contacts/search?q=${q}`),
   update: (data) => api.post('/contacts', data),
   delete: (id) => api.delete(`/contacts/${id}`),
-  addTag: (jid, tag) => api.post(`/contacts/${jid}/tags`, { tag }),
-  updateNotes: (jid, notes) => api.put(`/contacts/${jid}/notes`, { notes }),
+  addTag: (jid, tag, channelId) => api.post(`/contacts/${jid}/tags`, { tag, channelId }),
+  updateNotes: (jid, notes, channelId) => api.put(`/contacts/${jid}/notes`, { notes, channelId }),
 };
 
 export const messagesAPI = {

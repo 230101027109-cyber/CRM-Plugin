@@ -1,6 +1,7 @@
 const Channel = require('../models/Channel');
 const Conversation = require('../models/Conversation');
 const ChatMessage = require('../models/ChatMessage');
+const Contact = require('../models/Contact');
 const whatsappService = require('../services/baileysService');
 
 const reconcileChannelStatus = async (channel) => {
@@ -83,12 +84,13 @@ const deleteChannel = async (req, res) => {
     if (!channel) return res.status(404).json({ success: false, message: 'Channel not found' });
 
     // Disconnect if connected
-    if (channel.status === 'connected') {
+    if (channel.status !== 'disconnected') {
       await whatsappService.stopSession(channel.channelId);
     }
 
     await Promise.all([
       Channel.deleteOne({ _id: req.params.id, tenantId: req.user.tenantId }),
+      Contact.deleteMany({ tenantId: req.user.tenantId, channelId: channel.channelId }),
       Conversation.deleteMany({ tenantId: req.user.tenantId, channelId: channel.channelId }),
       ChatMessage.deleteMany({ tenantId: req.user.tenantId, channelId: channel.channelId }),
     ]);

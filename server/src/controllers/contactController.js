@@ -223,19 +223,27 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
   if (!tenantId) throw new Error('tenantId is required');
   if (!channelId) throw new Error('channelId is required');
 
-  await ensureRedisConnection();
-
   const lockKey = contactSyncLockKey(tenantId, channelId);
   const stateKey = contactSyncStateKey(tenantId, channelId);
   const fingerprintKey = contactFingerprintKey(tenantId, channelId);
   const lockToken = crypto.randomUUID();
+  let redisAvailable = true;
+  let lockAcquired = false;
 
-  const lockAcquired = await redisClient.set(lockKey, lockToken, {
-    NX: true,
-    EX: SYNC_LOCK_TTL_SECONDS,
-  });
+  try {
+    await ensureRedisConnection();
+    lockAcquired = await redisClient.set(lockKey, lockToken, {
+      NX: true,
+      EX: SYNC_LOCK_TTL_SECONDS,
+    });
+  } catch (error) {
+    // Redis provides coordination and incremental-sync state, but it must not
+    // make WhatsApp contact import unavailable when MongoDB is healthy.
+    redisAvailable = false;
+    console.warn(`[Sync] Redis unavailable; continuing without sync state: ${error.message}`);
+  }
 
-  if (lockAcquired !== 'OK') {
+  if (redisAvailable && lockAcquired !== 'OK') {
     return {
       success: false,
       skipped: true,
@@ -246,7 +254,7 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
   }
 
   try {
-    const state = await redisClient.hGetAll(stateKey);
+    const state = redisAvailable ? await redisClient.hGetAll(stateKey) : {};
     const isInitialSync = state.initialSyncCompleted !== 'true';
 
     console.log(
@@ -379,18 +387,21 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
           pushName: incomingPushName,
         };
         const fingerprint = buildContactFingerprint(fingerprintPayload);
-        const oldFingerprint = await getRedisHash(fingerprintKey, candidate.jid);
-
-        if (oldFingerprint === fingerprint) {
-          unchangedCount++;
-          continue;
-        }
-
         const existing = await Contact.findOne({
           tenantId,
           channelId,
           jid: candidate.jid,
         });
+        const oldFingerprint = redisAvailable
+          ? await getRedisHash(fingerprintKey, candidate.jid)
+          : null;
+
+        // A Redis fingerprint can outlive a manually deleted Mongo record.
+        // Only skip an unchanged candidate when the contact still exists.
+        if (existing && oldFingerprint === fingerprint) {
+          unchangedCount++;
+          continue;
+        }
 
         const set = {
           tenantId,
@@ -438,7 +449,32 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
         if (result.upsertedCount > 0) createdCount++;
         else updatedCount++;
 
-        await setRedisHash(fingerprintKey, candidate.jid, fingerprint);
+        // History messages can create a conversation before the richer
+        // WhatsApp contact record is synced. Attach the contact and refresh
+        // its display data once the contact becomes available.
+        const persistedContact = await Contact.findOne({
+          tenantId,
+          channelId,
+          jid: candidate.jid,
+        }).select('_id name pushName businessName phone isGroup');
+
+        if (persistedContact) {
+          await Conversation.updateMany(
+            { tenantId, channelId, contactJid: candidate.jid },
+            {
+              $set: {
+                contactId: persistedContact._id,
+                name: pickDisplayName(candidate, persistedContact),
+                phone: persistedContact.phone || candidate.phone,
+                isGroup: Boolean(persistedContact.isGroup),
+              },
+            }
+          );
+        }
+
+        if (redisAvailable) {
+          await setRedisHash(fingerprintKey, candidate.jid, fingerprint);
+        }
       } catch (error) {
         errorCount++;
         console.error(`[Sync] Failed to persist ${candidate.jid}:`, error.message);
@@ -446,18 +482,20 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
     }
 
     const now = new Date().toISOString();
-    await redisClient.hSet(stateKey, {
-      initialSyncCompleted: 'true',
-      lastSyncAt: now,
-      lastSyncMode: isInitialSync ? 'initial' : 'incremental',
-      lastScannedCount: String(scannedCount),
-      lastCreatedCount: String(createdCount),
-      lastUpdatedCount: String(updatedCount),
-      lastUnchangedCount: String(unchangedCount),
-      lastErrorCount: String(errorCount),
-    });
-    await redisClient.expire(stateKey, SYNC_STATE_TTL_SECONDS);
-    await redisClient.expire(fingerprintKey, SYNC_STATE_TTL_SECONDS);
+    if (redisAvailable) {
+      await redisClient.hSet(stateKey, {
+        initialSyncCompleted: 'true',
+        lastSyncAt: now,
+        lastSyncMode: isInitialSync ? 'initial' : 'incremental',
+        lastScannedCount: String(scannedCount),
+        lastCreatedCount: String(createdCount),
+        lastUpdatedCount: String(updatedCount),
+        lastUnchangedCount: String(unchangedCount),
+        lastErrorCount: String(errorCount),
+      });
+      await redisClient.expire(stateKey, SYNC_STATE_TTL_SECONDS);
+      await redisClient.expire(fingerprintKey, SYNC_STATE_TTL_SECONDS);
+    }
 
     const result = {
       success: true,
@@ -471,13 +509,16 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
       unchanged: unchangedCount,
       errors: errorCount,
       synced: createdCount + updatedCount,
+      redisAvailable,
     };
 
     console.log(`[Sync] Completed: ${JSON.stringify(result)}`);
     return result;
   } finally {
     try {
-      await releaseLock(lockKey, lockToken);
+      if (redisAvailable && lockAcquired === 'OK') {
+        await releaseLock(lockKey, lockToken);
+      }
     } catch (error) {
       console.error(`[Sync] Failed to release Redis lock ${lockKey}:`, error.message);
     }
@@ -485,22 +526,39 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
 };
 
 const getContactSyncStatus = async (tenantId, channelId) => {
-  await ensureRedisConnection();
+  try {
+    await ensureRedisConnection();
 
-  const state = await redisClient.hGetAll(contactSyncStateKey(tenantId, channelId));
-  const lockExists = Boolean(await redisClient.exists(contactSyncLockKey(tenantId, channelId)));
+    const state = await redisClient.hGetAll(contactSyncStateKey(tenantId, channelId));
+    const lockExists = Boolean(await redisClient.exists(contactSyncLockKey(tenantId, channelId)));
 
-  return {
-    initialSyncCompleted: state.initialSyncCompleted === 'true',
-    lastSyncAt: state.lastSyncAt || null,
-    lastSyncMode: state.lastSyncMode || null,
-    lastScannedCount: Number(state.lastScannedCount || 0),
-    lastCreatedCount: Number(state.lastCreatedCount || 0),
-    lastUpdatedCount: Number(state.lastUpdatedCount || 0),
-    lastUnchangedCount: Number(state.lastUnchangedCount || 0),
-    lastErrorCount: Number(state.lastErrorCount || 0),
-    syncInProgress: lockExists,
-  };
+    return {
+      initialSyncCompleted: state.initialSyncCompleted === 'true',
+      lastSyncAt: state.lastSyncAt || null,
+      lastSyncMode: state.lastSyncMode || null,
+      lastScannedCount: Number(state.lastScannedCount || 0),
+      lastCreatedCount: Number(state.lastCreatedCount || 0),
+      lastUpdatedCount: Number(state.lastUpdatedCount || 0),
+      lastUnchangedCount: Number(state.lastUnchangedCount || 0),
+      lastErrorCount: Number(state.lastErrorCount || 0),
+      syncInProgress: lockExists,
+      redisAvailable: true,
+    };
+  } catch (error) {
+    console.warn(`[Sync] Could not read sync status from Redis: ${error.message}`);
+    return {
+      initialSyncCompleted: false,
+      lastSyncAt: null,
+      lastSyncMode: null,
+      lastScannedCount: 0,
+      lastCreatedCount: 0,
+      lastUpdatedCount: 0,
+      lastUnchangedCount: 0,
+      lastErrorCount: 0,
+      syncInProgress: false,
+      redisAvailable: false,
+    };
+  }
 };
 
 const createOrUpdateContact = async (tenantId, data) => {
@@ -752,17 +810,17 @@ const mergeContactIdentity = async ({
   return jid;
 };
 
-const addContactTag = async (tenantId, jid, tag) => {
+const addContactTag = async (tenantId, channelId, jid, tag) => {
   return await Contact.findOneAndUpdate(
-    { tenantId, jid },
+    { tenantId, channelId, jid },
     { $addToSet: { tags: tag } },
     { new: true }
   );
 };
 
-const updateContactNotes = async (tenantId, jid, notes) => {
+const updateContactNotes = async (tenantId, channelId, jid, notes) => {
   return await Contact.findOneAndUpdate(
-    { tenantId, jid },
+    { tenantId, channelId, jid },
     { notes },
     { new: true }
   );
@@ -772,11 +830,21 @@ const deleteContact = async (tenantId, contactId) => {
   const contact = await Contact.findOne({ _id: contactId, tenantId });
   if (!contact) return { deleted: false, contact: null };
 
+  const contactJids = [contact.jid, ...(contact.aliases || [])].filter(Boolean);
+
   await Promise.all([
     Contact.deleteOne({ _id: contactId, tenantId }),
     Conversation.deleteMany({ tenantId, contactId }),
-    Conversation.deleteMany({ tenantId, contactJid: contact.jid }),
-    ChatMessage.deleteMany({ tenantId, remoteJid: contact.jid }),
+    Conversation.deleteMany({
+      tenantId,
+      channelId: contact.channelId,
+      contactJid: { $in: contactJids },
+    }),
+    ChatMessage.deleteMany({
+      tenantId,
+      channelId: contact.channelId,
+      remoteJid: { $in: contactJids },
+    }),
   ]);
 
   return { deleted: true, contact };

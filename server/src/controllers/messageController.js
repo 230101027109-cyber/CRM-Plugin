@@ -65,6 +65,12 @@ const saveMessage = async (data) => {
     );
   }
 
+  // LIDs are private, temporary WhatsApp identifiers. They must never become
+  // CRM contacts; the socket layer waits for a phone-number mapping first.
+  if (String(data.remoteJid).endsWith('@lid')) {
+    return { message: null, created: false, skipped: true, reason: 'unresolved_lid' };
+  }
+
   const filter = {
     tenantId: data.tenantId,
     channelId: data.channelId,
@@ -99,17 +105,21 @@ const saveMessage = async (data) => {
     throw error;
   }
 
+  // Keep update operators separate. MongoDB rejects an update that mixes
+  // ordinary fields with operators (for example `jid` and `$inc`). That was
+  // preventing every inbound message from updating its contact/conversation.
   const contactUpdate = {
-    tenantId: data.tenantId,
-    channelId: data.channelId,
-    jid: data.remoteJid,
-    lastMessage:
-      data.content ||
-      data.caption ||
-      '',
-    lastMessageTime:
-      data.timestamp ||
-      new Date(),
+    $set: {
+      lastMessage: data.content || data.caption || '',
+      lastMessageTime: data.timestamp || new Date(),
+    },
+    $setOnInsert: {
+      tenantId: data.tenantId,
+      channelId: data.channelId,
+      jid: data.remoteJid,
+      phone: String(data.remoteJid).split('@')[0].split(':')[0].replace(/\D/g, ''),
+      isGroup: String(data.remoteJid).includes('@g.us'),
+    },
   };
 
   if (!data.fromMe) {

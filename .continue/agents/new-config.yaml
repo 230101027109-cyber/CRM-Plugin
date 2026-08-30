@@ -1,0 +1,29 @@
+name: Main Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Gemini 3.7 Flash
+    provider: openai
+    model: gemini-3.7-flash
+    apiBase: http://localhost:8081/v1
+    apiKey: sk-anything
+
+  - name: Gemini Thinking
+    provider: openai
+    model: gemini-3.5-flash-thinking
+    apiBase: http://localhost:8081/v1
+    apiKey: sk-anything
+
+  - name: Gemini Flash
+    provider: openai
+    model: gemini-3.5-flash
+    apiBase: http://localhost:8081/v1
+    apiKey: sk-anything
+
+tabAutocompleteModel:
+  name: Gemini Flash
+  provider: openai
+  model: gemini-3.5-flash
+  apiBase: http://localhost:8081/v1
+  apiKey: sk-anything

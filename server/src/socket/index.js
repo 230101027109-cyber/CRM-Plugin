@@ -4,6 +4,7 @@ const uuid = require('uuid');
 const {
   setGlobalMessageHandler,
   setGlobalQRHandler,
+  setGlobalLidMappingHandler,
   getCanonicalJid,
 } = require('../services/baileysService');
 const {
@@ -16,24 +17,25 @@ const {
 } = require('../utils/conversationKey');
 
 const initSocket = (server) => {
+  // Messages may arrive just before Baileys announces the LID -> phone JID
+  // mapping. Keep them briefly in memory and replay them once resolved.
+  const pendingLidMessages = new Map();
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : (process.env.NODE_ENV === 'production' ? false : 'http://localhost:3000');
+
   const io = new Server(server, {
     cors: {
-      origin:
-        process.env.NODE_ENV === 'production'
-          ? false
-          : 'http://localhost:3000',
+      origin: allowedOrigins,
       credentials: true,
     },
   });
 
-  const authenticateSocket = (
-    token
-  ) => {
+  const authenticateSocket = (token) => {
+    if (!token || !process.env.JWT_SECRET) return null;
     try {
-      return jwt.verify(
-        token,
-        process.env.JWT_SECRET
-      );
+      const cleanToken = token.startsWith('Bearer ') ? token.slice(7) : token;
+      return jwt.verify(cleanToken, process.env.JWT_SECRET);
     } catch {
       return null;
     }
@@ -41,25 +43,19 @@ const initSocket = (server) => {
 
   io.use((socket, next) => {
     const token =
-      socket.handshake.auth?.token;
-
-    const user =
-      authenticateSocket(token);
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token;
+    const user = authenticateSocket(token);
 
     if (!user) {
-      return next(
-        new Error(
-          'Authentication error'
-        )
-      );
+      return next(new Error('Authentication error: Invalid or missing token'));
     }
 
     socket.user = user;
     next();
   });
 
-  setGlobalMessageHandler(
-    async ({
+  const handleWhatsAppMessage = async ({
       tenantId,
       channelId,
       msg,
@@ -92,6 +88,19 @@ const initSocket = (server) => {
         if (knownContact?.jid) {
           remoteJid = knownContact.jid;
         }
+      }
+
+      // A private WhatsApp LID is not a usable CRM identity. Do not create
+      // contacts/messages under it; wait until Baileys supplies the phone-JID
+      // mapping through chats.phoneNumberShare.
+      if (remoteJid.endsWith('@lid')) {
+        const key = `${channelId}::${remoteJid}`;
+        const pending = pendingLidMessages.get(key) || [];
+        pending.push({ tenantId, channelId, msg });
+        pendingLidMessages.set(key, pending.slice(-20));
+        setTimeout(() => pendingLidMessages.delete(key), 60 * 1000);
+        console.log(`[Socket] Queued LID message while waiting for phone mapping on channel ${channelId}`);
+        return;
       }
 
       const fromMe =
@@ -246,8 +255,24 @@ const initSocket = (server) => {
           error.message
         );
       }
+    };
+
+  setGlobalMessageHandler(handleWhatsAppMessage);
+
+  setGlobalLidMappingHandler(async ({ tenantId, channelId, lid, jid }) => {
+    const key = `${channelId}::${lid}`;
+    const pending = pendingLidMessages.get(key) || [];
+    pendingLidMessages.delete(key);
+
+    for (const item of pending) {
+      // getCanonicalJid now resolves the original LID to this phone JID.
+      await handleWhatsAppMessage(item);
     }
-  );
+
+    if (pending.length) {
+      console.log(`[Socket] Replayed ${pending.length} LID message(s) for ${jid}`);
+    }
+  });
 
   setGlobalQRHandler(
     async ({

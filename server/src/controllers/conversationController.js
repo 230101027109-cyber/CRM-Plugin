@@ -1,5 +1,6 @@
 const Conversation = require('../models/Conversation');
 const Contact = require('../models/Contact');
+const ChatMessage = require('../models/ChatMessage');
 const { buildConversationKey } = require('../utils/conversationKey');
 
 const normalizeJid = (jid) => String(jid || '').trim();
@@ -24,11 +25,6 @@ const ensureConversation = async ({
       tenantId,
       channelId,
       contactJid: normalizedJid,
-      status: 'open',
-      unreadCount: 0,
-      lastMessage: '',
-      lastMessageTime: new Date(),
-      isGroup: Boolean(isGroup),
     },
     $set: {
       status: 'active',
@@ -214,16 +210,8 @@ const updateConversationFromMessage = async ({
       tenantId,
       channelId,
       contactJid: normalizedJid,
-      status: 'active',
-      unreadCount: 0,
-      lastMessage: '',
-      lastMessageTime: timestamp || new Date(),
-      isGroup: Boolean(contact?.isGroup),
     },
     $set: {
-      tenantId,
-      channelId,
-      contactJid: normalizedJid,
       status: 'active',
       lastMessage: content || '',
       lastMessageTime: timestamp || new Date(),
@@ -286,9 +274,37 @@ const updateConversationFromMessage = async ({
   }
 };
 
+const deleteConversation = async (req, res) => {
+  try {
+    const conversation = await Conversation.findOne({
+      tenantId: req.user.tenantId,
+      conversationId: req.params.id,
+    }).lean();
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    await Promise.all([
+      Conversation.deleteOne({ _id: conversation._id, tenantId: req.user.tenantId }),
+      ChatMessage.deleteMany({
+        tenantId: req.user.tenantId,
+        channelId: conversation.channelId,
+        remoteJid: conversation.contactJid,
+      }),
+    ]);
+
+    res.json({ success: true, message: 'Conversation and messages deleted' });
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   ensureConversation,
   getConversations,
   openConversation,
   updateConversationFromMessage,
+  deleteConversation,
 };

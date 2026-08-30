@@ -65,9 +65,10 @@ router.post('/', authenticate, async (req, res) => {
 
 router.post('/:jid/tags', authenticate, async (req, res) => {
   try {
-    const { tag } = req.body;
-    if (!tag) return res.status(400).json({ success: false, message: 'Tag required' });
-    const contact = await addContactTag(req.user.tenantId, req.params.jid, tag);
+    const { tag, channelId } = req.body;
+    if (!tag || !channelId) return res.status(400).json({ success: false, message: 'tag and channelId are required' });
+    const contact = await addContactTag(req.user.tenantId, channelId, req.params.jid, tag);
+    if (!contact) return res.status(404).json({ success: false, message: 'Contact not found for this channel' });
     res.json({ success: true, data: contact });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -76,7 +77,10 @@ router.post('/:jid/tags', authenticate, async (req, res) => {
 
 router.put('/:jid/notes', authenticate, async (req, res) => {
   try {
-    const contact = await updateContactNotes(req.user.tenantId, req.params.jid, req.body.notes);
+    const { channelId, notes } = req.body;
+    if (!channelId) return res.status(400).json({ success: false, message: 'channelId is required' });
+    const contact = await updateContactNotes(req.user.tenantId, channelId, req.params.jid, notes);
+    if (!contact) return res.status(404).json({ success: false, message: 'Contact not found for this channel' });
     res.json({ success: true, data: contact });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

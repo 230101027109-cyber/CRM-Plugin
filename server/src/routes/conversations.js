@@ -4,6 +4,7 @@ const authenticate = require('../middleware/auth');
 const {
   getConversations,
   openConversation,
+  deleteConversation,
 } = require('../controllers/conversationController');
 
 const router =
@@ -47,5 +48,7 @@ router.post(
     );
   }
 );
+
+router.delete('/:id', deleteConversation);
 
 module.exports = router;
