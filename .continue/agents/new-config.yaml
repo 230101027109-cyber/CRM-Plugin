@@ -3,6 +3,12 @@ version: 1.0.0
 schema: v1
 
 models:
+  - name: OmniRoute Auto
+    provider: openai
+    model: auto
+    apiBase: http://localhost:20128/v1
+    apiKey: sk-anything
+
   - name: Gemini 3.7 Flash
     provider: openai
     model: gemini-3.7-flash
@@ -12,12 +18,6 @@ models:
   - name: Gemini Thinking
     provider: openai
     model: gemini-3.5-flash-thinking
-    apiBase: http://localhost:8081/v1
-    apiKey: sk-anything
-
-  - name: Gemini Flash
-    provider: openai
-    model: gemini-3.5-flash
     apiBase: http://localhost:8081/v1
     apiKey: sk-anything
 
