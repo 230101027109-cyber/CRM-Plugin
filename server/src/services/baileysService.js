@@ -185,7 +185,7 @@ const stopSession = async (channelId) => {
 
 const getSession = (channelId) => {
   return sessions.get(channelId);
-};
+}
 
 const getStore = (channelId) => {
   return stores.get(channelId);
@@ -215,7 +215,7 @@ const sendMessage = async (channelId, jid, content, options = {}) => {
 
   const targetJid = getCanonicalJid(channelId, jid);
 
-  if (!targetJid || targetJid.endsWith('@lid')) {
+  if (!targetJid) {
     return {
       success: false,
       error: 'Could not resolve WhatsApp contact to a canonical JID',
@@ -260,7 +260,5 @@ module.exports = {
   sendMessage,
   setGlobalMessageHandler,
   setGlobalQRHandler,
-  setGlobalLidMappingHandler,
-};
-
-
+  setGlobalLidMappingHandler
+}

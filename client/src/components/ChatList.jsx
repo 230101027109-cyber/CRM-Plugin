@@ -15,7 +15,7 @@ const ChatList = ({ onSelectChat, activeChat }) => {
   const [contacts, setContacts] = useState([]);
   const [selectedChannelId, setSelectedChannelId] = useState('');
   const [selectedContactId, setSelectedContactId] = useState('');
-  const { isConnected, newMessages } = useSocket();
+  const { isConnected, newMessages, clearMessagesForConversation } = useSocket();
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -138,15 +138,13 @@ const ChatList = ({ onSelectChat, activeChat }) => {
 
     return Array.from(map.values()).sort(
       (a, b) =>
-        new Date(b.lastMessageTime || 0).getTime() -
-        new Date(a.lastMessageTime || 0).getTime()
+        new Date(b.lastMessageTime || 0) - new Date(a.lastMessageTime || 0)
     );
-  }, [chats, newMessages, user?.tenantId]);
+  }, [chats, newMessages, user]);
 
   const filteredChats = useMemo(() => {
     if (!searchQuery.trim()) return enrichedChats;
-
-    const q = searchQuery.trim().toLowerCase();
+    const q = searchQuery.toLowerCase();
 
     return enrichedChats.filter(
       (chat) =>
@@ -162,6 +160,24 @@ const ChatList = ({ onSelectChat, activeChat }) => {
       ),
     [contacts, selectedChannelId]
   );
+
+  useEffect(() => {
+    if (activeChat) {
+      const activeKey = activeChat.conversationKey || `${activeChat.channelId}::${activeChat.jid}`;
+      const latestActiveChat = enrichedChats.find(
+        (c) => (c.conversationKey || `${c.channelId}::${c.jid}`) === activeKey
+      );
+
+      if (
+        latestActiveChat &&
+        (latestActiveChat.updatedAt !== activeChat.updatedAt ||
+          latestActiveChat.lastMessageTime !== activeChat.lastMessageTime ||
+          latestActiveChat.unreadCount !== activeChat.unreadCount)
+      ) {
+        onSelectChat(latestActiveChat);
+      }
+    }
+  }, [enrichedChats, activeChat, onSelectChat]);
 
   useEffect(() => {
     if (channelContacts.length === 0) {
@@ -218,6 +234,10 @@ const ChatList = ({ onSelectChat, activeChat }) => {
 
     try {
       await conversationsAPI.delete(chat.conversationId);
+      
+      const conversationKey = chat.conversationKey || `${chat.channelId}::${chat.jid}`;
+      clearMessagesForConversation(conversationKey);
+
       setChats((currentChats) =>
         currentChats.filter((item) => item.conversationId !== chat.conversationId)
       );
@@ -235,14 +255,14 @@ const ChatList = ({ onSelectChat, activeChat }) => {
       <div className="p-4 bg-gray-50 border-b">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold text-gray-800">WhatsApp CRM</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" title="Real-time Server Connection">
             <span
               className={`w-3 h-3 rounded-full ${
                 isConnected ? 'bg-green-500' : 'bg-red-500'
               }`}
             />
             <span className="text-xs text-gray-500">
-              {isConnected ? 'Online' : 'Offline'}
+              {isConnected ? 'Server Connected' : 'Server Offline'}
             </span>
           </div>
         </div>

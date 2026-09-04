@@ -90,18 +90,9 @@ const initSocket = (server) => {
         }
       }
 
-      // A private WhatsApp LID is not a usable CRM identity. Do not create
-      // contacts/messages under it; wait until Baileys supplies the phone-JID
-      // mapping through chats.phoneNumberShare.
-      if (remoteJid.endsWith('@lid')) {
-        const key = `${channelId}::${remoteJid}`;
-        const pending = pendingLidMessages.get(key) || [];
-        pending.push({ tenantId, channelId, msg });
-        pendingLidMessages.set(key, pending.slice(-20));
-        setTimeout(() => pendingLidMessages.delete(key), 60 * 1000);
-        console.log(`[Socket] Queued LID message while waiting for phone mapping on channel ${channelId}`);
-        return;
-      }
+      // A private WhatsApp LID will be saved directly. If a phone number
+      // mapping arrives later via chats.phoneNumberShare, the merge logic
+      // will combine them automatically.
 
       const fromMe =
         msg.key.fromMe === true;
@@ -191,6 +182,7 @@ const initSocket = (server) => {
                   remoteJid
               ),
             ],
+            pushName: msg.pushName || '',
           });
 
         const saved =

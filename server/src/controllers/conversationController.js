@@ -205,8 +205,10 @@ const updateConversationFromMessage = async ({
     contactJid: normalizedJid,
   }).lean();
 
+  const { v4: uuidv4 } = require('uuid');
   const update = {
     $setOnInsert: {
+      conversationId: uuidv4(),
       tenantId,
       channelId,
       contactJid: normalizedJid,

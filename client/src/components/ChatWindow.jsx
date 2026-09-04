@@ -130,6 +130,8 @@ const ChatWindow = ({ chat, onBack }) => {
     }
   }, [chat?.jid, chat?.channelId]);
 
+  const prevJidRef = useRef(null);
+
   useEffect(() => {
     if (!chat?.jid || !chat?.channelId) {
       setMessages([]);
@@ -137,9 +139,12 @@ const ChatWindow = ({ chat, onBack }) => {
       return undefined;
     }
 
-    seenIdsRef.current = new Set();
-    setMessages([]);
-    setLoading(true);
+    if (prevJidRef.current !== chat.jid) {
+      seenIdsRef.current = new Set();
+      setMessages([]);
+      setLoading(true);
+      prevJidRef.current = chat.jid;
+    }
 
     fetchMessages();
     joinChat(chat.jid, chat.channelId);
@@ -150,6 +155,7 @@ const ChatWindow = ({ chat, onBack }) => {
   }, [
     chat?.jid,
     chat?.channelId,
+    chat?.updatedAt,
     fetchMessages,
     joinChat,
     leaveChat,

@@ -43,6 +43,8 @@ export const SocketProvider = ({ children }) => {
       }
     );
 
+    setIsConnected(newSocket.connected);
+
     newSocket.on('connect', () => {
       setIsConnected(true);
     });
@@ -106,6 +108,14 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
+  const clearMessagesForConversation = useCallback((conversationKey) => {
+    setNewMessages((prev) => {
+      const next = { ...prev };
+      delete next[conversationKey];
+      return next;
+    });
+  }, []);
+
   const joinChat = useCallback(
     (jid, channelId) => {
       if (!socket || !jid || !channelId) return;
@@ -141,6 +151,7 @@ export const SocketProvider = ({ children }) => {
         setWhatsappStatus,
         joinChat,
         leaveChat,
+        clearMessagesForConversation,
       }}
     >
       {children}

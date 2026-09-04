@@ -65,11 +65,9 @@ const saveMessage = async (data) => {
     );
   }
 
-  // LIDs are private, temporary WhatsApp identifiers. They must never become
-  // CRM contacts; the socket layer waits for a phone-number mapping first.
-  if (String(data.remoteJid).endsWith('@lid')) {
-    return { message: null, created: false, skipped: true, reason: 'unresolved_lid' };
-  }
+  // A private WhatsApp LID will be saved directly. If a phone number
+  // mapping arrives later via chats.phoneNumberShare, the merge logic
+  // will combine them automatically.
 
   const filter = {
     tenantId: data.tenantId,
@@ -112,6 +110,7 @@ const saveMessage = async (data) => {
     $set: {
       lastMessage: data.content || data.caption || '',
       lastMessageTime: data.timestamp || new Date(),
+      ...(data.pushName ? { pushName: data.pushName } : {}),
     },
     $setOnInsert: {
       tenantId: data.tenantId,

@@ -434,20 +434,43 @@ const syncContacts = async (sock, store, tenantId, channelId) => {
         if (cleanText(candidate.lastMessage)) set.lastMessage = cleanText(candidate.lastMessage);
         if (candidate.lastMessageTime) set.lastMessageTime = new Date(candidate.lastMessageTime);
 
+        const updateQuery = {
+          $set: set,
+        };
+        
+        if (candidate.aliases && candidate.aliases.length > 0) {
+          updateQuery.$addToSet = {
+            aliases: { $each: candidate.aliases },
+          };
+        }
+
         const result = await Contact.updateOne(
           {
             tenantId,
             channelId,
             jid: candidate.jid,
           },
-          {
-            $set: set,
-          },
+          updateQuery,
           { upsert: true }
         );
 
         if (result.upsertedCount > 0) createdCount++;
         else updatedCount++;
+
+        // If the candidate had a LID, proactively trigger the merge logic
+        // in case the CRM had previously created orphaned LID conversations.
+        if (candidate.aliases && candidate.aliases.length > 0) {
+          for (const lid of candidate.aliases) {
+            if (lid !== candidate.jid) {
+              await mergeContactIdentity({
+                tenantId,
+                channelId,
+                lid,
+                jid: candidate.jid,
+              });
+            }
+          }
+        }
 
         // History messages can create a conversation before the richer
         // WhatsApp contact record is synced. Attach the contact and refresh
