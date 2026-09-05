@@ -5,7 +5,7 @@ import React, {
   useCallback,
 } from 'react';
 import { messagesAPI } from '../services/api';
-import { useSocket } from '../hooks/useSocket.jsx';
+import { useSocket } from '../hooks/useSocket';
 import moment from 'moment';
 import {
   Send,

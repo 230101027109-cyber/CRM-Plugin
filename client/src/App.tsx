@@ -10,18 +10,22 @@ import Tickets from './pages/Tickets';
 import Workflows from './pages/Workflows';
 import Settings from './pages/Settings';
 import DashboardLayout from './components/DashboardLayout';
-import { useAuth } from './hooks/useAuth.jsx';
+import { useAuth } from './hooks/useAuth';
 
-const ProtectedRoute = ({ children }) => {
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+}
+
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen bg-[#111b21] text-white">Loading...</div>;
   if (!user) return <Navigate to="/" replace />;
-  return children;
+  return <>{children}</>;
 };
 
-const App = () => {
+const App: React.FC = () => {
   const { user } = useAuth();
-
+  
   return (
     <Routes>
       <Route path="/" element={user ? <Navigate to="/chats" replace /> : <Login />} />

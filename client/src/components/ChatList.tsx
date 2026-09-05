@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { contactsAPI, channelsAPI, conversationsAPI } from '../services/api';
-import { useSocket } from '../hooks/useSocket.jsx';
-import { useAuth } from '../hooks/useAuth.jsx';
+import { useSocket } from '../hooks/useSocket';
+import { useAuth } from '../hooks/useAuth';
 import moment from 'moment';
 import { Search, Plus, X, Trash2 } from 'lucide-react';
 

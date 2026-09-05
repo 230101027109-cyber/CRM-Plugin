@@ -1,12 +1,36 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from '../services/api';
 
-const AuthContext = createContext(null);
+interface User {
+  _id: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  tenantId?: string;
+  tenantName?: string;
+  role?: string;
+}
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (data: { email: string; pin: string }) => Promise<{ success: boolean; message?: string }>;
+  register: (data: Record<string, string>) => Promise<{ success: boolean; message?: string }>;
+  updateProfile: (data: Record<string, string>) => Promise<{ success: boolean; message?: string }>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+interface AuthProviderProps {
+  children: React.ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-
+  
   useEffect(() => {
     const token = localStorage.getItem('crm_token');
     if (token) {
@@ -26,7 +50,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const register = useCallback(async (data) => {
+  const register = useCallback(async (data: Record<string, string>) => {
     try {
       const res = await authAPI.register(data);
       if (res.data.success) {
@@ -36,11 +60,11 @@ export const AuthProvider = ({ children }) => {
       }
       return { success: false, message: res.data.message };
     } catch (error) {
-      return { success: false, message: error.response?.data?.message || 'Registration failed' };
+      return { success: false, message: (error as any).response?.data?.message || 'Registration failed' };
     }
   }, []);
 
-  const login = useCallback(async (data) => {
+  const login = useCallback(async (data: { email: string; pin: string }) => {
     try {
       const res = await authAPI.login(data);
       if (res.data.success) {
@@ -50,20 +74,20 @@ export const AuthProvider = ({ children }) => {
       }
       return { success: false, message: res.data.message };
     } catch (error) {
-      return { success: false, message: error.response?.data?.message || 'Login failed' };
+      return { success: false, message: (error as any).response?.data?.message || 'Login failed' };
     }
   }, []);
 
-  const updateProfile = useCallback(async (data) => {
+  const updateProfile = useCallback(async (data: Record<string, string>) => {
     try {
       const res = await authAPI.updateProfile(data);
       if (res.data.success) {
-        setUser(prev => ({ ...prev, ...res.data.user }));
+        setUser(prev => prev ? { ...prev, ...res.data.user } : null);
         return { success: true };
       }
       return { success: false, message: res.data.message };
     } catch (error) {
-      return { success: false, message: error.response?.data?.message || 'Profile update failed' };
+      return { success: false, message: (error as any).response?.data?.message || 'Profile update failed' };
     }
   }, []);
 
@@ -79,4 +103,10 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

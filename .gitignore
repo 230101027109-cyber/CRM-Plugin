@@ -2,49 +2,48 @@
 # Dependencies
 node_modules/
 
-# Build artifacts
+# Build outputs
 dist/
 build/
-target/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-.ENV
-.python-version
-
-# Logs
-*.log
+# TypeScript/JavaScript specific
+*.tsbuildinfo
+.next/
+.nuxt/
 
 # Environment variables
 .env
 .env.local
-.env.*
+*.env.*
 
-# IDE files
+# IDE specific
 .vscode/
 .idea/
 *.swp
 *.swo
 
+# Logs
+*.log
+
+# Coverage
+coverage/
+htmlcov/
+*.coverage
+
+# Temporary files
+*.tmp
+
+# Python cache (if any Python files exist in the project)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# Testing
-.coverage
-coverage/
-htmlcov/
-.pytest_cache/
-.mypy_cache/
-
-# Compression
+# Compression files
 *.zip
 *.gz
 *.tar

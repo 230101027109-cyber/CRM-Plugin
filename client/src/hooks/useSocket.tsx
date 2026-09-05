@@ -1,17 +1,36 @@
-import {
-  io,
-} from 'socket.io-client';
-import {
-  useContext,
-  createContext,
-  useEffect,
-  useState,
-  useCallback,
-} from 'react';
+import { io, Socket } from 'socket.io-client';
+import { useContext, createContext, useEffect, useState, useCallback, ReactNode } from 'react';
 
-const SocketContext = createContext(null);
+interface Message {
+  messageId?: string;
+  channelId: string;
+  remoteJid: string;
+  content?: string;
+  caption?: string;
+  fromMe?: boolean;
+  read?: boolean;
+  timestamp?: string;
+}
 
-export const useSocket = () => {
+interface NewMessagesMap {
+  [conversationKey: string]: Message[];
+}
+
+interface SocketContextType {
+  socket: Socket | null;
+  isConnected: boolean;
+  newMessages: NewMessagesMap;
+  qrCode: string | null;
+  whatsappStatus: string;
+  setWhatsappStatus: (status: string) => void;
+  joinChat: (jid: string, channelId: string) => void;
+  leaveChat: (jid: string, channelId: string) => void;
+  clearMessagesForConversation: (conversationKey: string) => void;
+}
+
+const SocketContext = createContext<SocketContextType | null>(null);
+
+export const useSocket = (): SocketContextType => {
   const context = useContext(SocketContext);
 
   if (!context) {
@@ -23,11 +42,15 @@ export const useSocket = () => {
   return context;
 };
 
-export const SocketProvider = ({ children }) => {
-  const [socket, setSocket] = useState(null);
+interface SocketProviderProps {
+  children: ReactNode;
+}
+
+export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [newMessages, setNewMessages] = useState({});
-  const [qrCode, setQrCode] = useState(null);
+  const [newMessages, setNewMessages] = useState<NewMessagesMap>({});
+  const [qrCode, setQrCode] = useState<string | null>(null);
   const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
 
   useEffect(() => {
@@ -53,13 +76,18 @@ export const SocketProvider = ({ children }) => {
       setIsConnected(false);
     });
 
-    newSocket.on('qr_code', (qr) => {
+    newSocket.on('qr_code', (qr: string) => {
       setQrCode(qr);
     });
 
     newSocket.on(
       'new_message',
-      ({ conversationKey, channelId, remoteJid, message }) => {
+      ({ conversationKey, channelId, remoteJid, message }: { 
+        conversationKey: string; 
+        channelId: string; 
+        remoteJid: string; 
+        message: Message;
+      }) => {
         if (!conversationKey) {
           return;
         }
@@ -80,7 +108,7 @@ export const SocketProvider = ({ children }) => {
 
     newSocket.on(
       'messages_marked_read',
-      ({ conversationKey }) => {
+      ({ conversationKey }: { conversationKey: string }) => {
         if (!conversationKey) return;
 
         setNewMessages((previous) => {
@@ -108,7 +136,7 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
-  const clearMessagesForConversation = useCallback((conversationKey) => {
+  const clearMessagesForConversation = useCallback((conversationKey: string) => {
     setNewMessages((prev) => {
       const next = { ...prev };
       delete next[conversationKey];
@@ -117,7 +145,7 @@ export const SocketProvider = ({ children }) => {
   }, []);
 
   const joinChat = useCallback(
-    (jid, channelId) => {
+    (jid: string, channelId: string) => {
       if (!socket || !jid || !channelId) return;
 
       socket.emit('join_chat', {
@@ -129,7 +157,7 @@ export const SocketProvider = ({ children }) => {
   );
 
   const leaveChat = useCallback(
-    (jid, channelId) => {
+    (jid: string, channelId: string) => {
       if (!socket || !jid || !channelId) return;
 
       socket.emit('leave_chat', {
