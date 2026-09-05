@@ -1,0 +1,112 @@
+{
+  "plans": [
+    {
+      "planId": "free",
+      "name": "Free Trial",
+      "description": "Get started with WhatsApp CRM — 1 month free trial with essential features.",
+      "badge": null,
+      "isFree": true,
+      "trialDays": 30,
+      "features": {
+        "maxUsers": 2,
+        "maxChannels": 1,
+        "maxContacts": 100,
+        "maxMessagesPerDay": 50,
+        "workflows": false,
+        "ticketing": false,
+        "apiAccess": false,
+        "prioritySupport": false,
+        "customBranding": false,
+        "bulkMessaging": false,
+        "analytics": false,
+        "teamInbox": false
+      },
+      "pricing": {
+        "monthly": { "amount": 0, "currency": "usd", "stripePriceId": null },
+        "yearly": { "amount": 0, "currency": "usd", "stripePriceId": null }
+      },
+      "sortOrder": 0
+    },
+    {
+      "planId": "startup",
+      "name": "Startup",
+      "description": "Perfect for small teams getting started with WhatsApp CRM automation.",
+      "badge": null,
+      "isFree": false,
+      "trialDays": 0,
+      "features": {
+        "maxUsers": 5,
+        "maxChannels": 2,
+        "maxContacts": 1000,
+        "maxMessagesPerDay": 500,
+        "workflows": true,
+        "ticketing": true,
+        "apiAccess": false,
+        "prioritySupport": false,
+        "customBranding": false,
+        "bulkMessaging": false,
+        "analytics": true,
+        "teamInbox": true
+      },
+      "pricing": {
+        "monthly": { "amount": 2900, "currency": "usd", "stripePriceId": null },
+        "yearly": { "amount": 27900, "currency": "usd", "stripePriceId": null }
+      },
+      "sortOrder": 1
+    },
+    {
+      "planId": "professional",
+      "name": "Professional",
+      "description": "The most popular plan — advanced automation, analytics, and team collaboration.",
+      "badge": "Most Popular",
+      "isFree": false,
+      "trialDays": 0,
+      "features": {
+        "maxUsers": 15,
+        "maxChannels": 5,
+        "maxContacts": 10000,
+        "maxMessagesPerDay": 2000,
+        "workflows": true,
+        "ticketing": true,
+        "apiAccess": true,
+        "prioritySupport": true,
+        "customBranding": false,
+        "bulkMessaging": true,
+        "analytics": true,
+        "teamInbox": true
+      },
+      "pricing": {
+        "monthly": { "amount": 7900, "currency": "usd", "stripePriceId": null },
+        "yearly": { "amount": 74900, "currency": "usd", "stripePriceId": null }
+      },
+      "sortOrder": 2
+    },
+    {
+      "planId": "enterprise",
+      "name": "Enterprise",
+      "description": "Unlimited scale with custom branding, dedicated support, and full API access.",
+      "badge": null,
+      "isFree": false,
+      "trialDays": 0,
+      "features": {
+        "maxUsers": -1,
+        "maxChannels": -1,
+        "maxContacts": -1,
+        "maxMessagesPerDay": -1,
+        "workflows": true,
+        "ticketing": true,
+        "apiAccess": true,
+        "prioritySupport": true,
+        "customBranding": true,
+        "bulkMessaging": true,
+        "analytics": true,
+        "teamInbox": true
+      },
+      "pricing": {
+        "monthly": { "amount": 19900, "currency": "usd", "stripePriceId": null },
+        "yearly": { "amount": 189900, "currency": "usd", "stripePriceId": null }
+      },
+      "sortOrder": 3
+    }
+  ]
+}

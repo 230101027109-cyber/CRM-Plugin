@@ -7,6 +7,7 @@ const tenantSchema = new mongoose.Schema({
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   maxUsers: { type: Number, default: 3 },
   plan: { type: String, default: 'free' },
+  stripeCustomerId: { type: String, default: null, index: true },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Tenant', tenantSchema);

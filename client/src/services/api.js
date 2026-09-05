@@ -67,4 +67,11 @@ export const messagesAPI = {
     api.post('/messages/send', { remoteJid, content, ...options }),
 };
 
+export const billingAPI = {
+  getPlans: () => api.get('/billing/plans'),
+  getSubscription: () => api.get('/billing/subscription'),
+  createCheckout: (data) => api.post('/billing/checkout', data),
+  createPortal: () => api.post('/billing/portal'),
+};
+
 export default api;

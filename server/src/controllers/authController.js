@@ -22,6 +22,21 @@ const register = async (req, res) => {
     const tenant = new Tenant({ name: tName });
     await tenant.save();
 
+    // Create Stripe Customer
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const customer = await stripe.customers.create({
+      email,
+      name: tName,
+      metadata: {
+        tenantId: tenant.tenantId,
+        firstName,
+        lastName,
+      },
+    });
+
+    tenant.stripeCustomerId = customer.id;
+    await tenant.save();
+
     // Seed default workflows for this new tenant
     await seedDefaultWorkflows(tenant.tenantId);
 
@@ -44,6 +59,27 @@ const register = async (req, res) => {
     // Update Tenant with ownerId
     tenant.ownerId = user._id;
     await tenant.save();
+
+    // Create free trial subscription
+    const Subscription = require('../models/Subscription');
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 30);
+
+    await Subscription.create({
+      tenantId: tenant.tenantId,
+      planId: 'free',
+      status: 'trialing',
+      billingCycle: 'none',
+      stripeCustomerId: customer.id,
+      trialStart: new Date(),
+      trialEnd,
+      history: [{
+        planId: 'free',
+        status: 'trialing',
+        changedAt: new Date(),
+        reason: 'Registration — 30-day free trial started',
+      }],
+    });
 
     // Generate JWT
     const token = jwt.sign(

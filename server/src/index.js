@@ -14,6 +14,7 @@ const channelsRoutes = require('./routes/channels');
 const ticketsRoutes = require('./routes/tickets');
 const workflowsRoutes = require('./routes/workflows');
 const conversationsRoutes = require('./routes/conversations');
+const billingRoutes = require('./routes/billing');
 const loggerMiddleware = require('./middleware/logger');
 const path = require('path');
 
@@ -28,6 +29,10 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Mount webhook BEFORE body parser
+app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -45,6 +50,7 @@ app.use('/api/channels', channelsRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/conversations', conversationsRoutes);
+app.use('/api/billing', billingRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '../public')));
 app.use('/data', express.static(path.join(__dirname, '../public')));
