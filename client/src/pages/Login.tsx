@@ -1,16 +1,25 @@
 import React, { useState } from 'react';
 import { Phone, Mail, Lock, User, Building, ArrowRight } from 'lucide-react';
-import { useAuth } from '../hooks/useAuth.jsx';
+import { useAuth } from '../hooks/useAuth';
 import useForm from '../utils/useForm';
 
-const Login = () => {
-  const [activeTab, setActiveTab] = useState('login'); // 'login' or 'register'
-  const [loginMode, setLoginMode] = useState('email'); // 'email' or 'pin'
+interface FormValues {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  pin: string;
+  tenantName: string;
+}
+
+const Login: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [loginMode, setLoginMode] = useState<'email' | 'pin'>('email');
   const { login, register } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { values, handleChange, handleSubmit } = useForm({
+  const { values, handleChange, handleSubmit } = useForm<FormValues>({
     firstName: '',
     lastName: '',
     phone: '',
@@ -33,7 +42,7 @@ const Login = () => {
     
     setLoading(false);
     if (!res.success) {
-      setError(res.message);
+      setError(res.message || 'An error occurred');
     }
   });
 

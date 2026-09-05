@@ -12,14 +12,20 @@ import {
   Menu,
   X
 } from 'lucide-react';
-import { useAuth } from '../hooks/useAuth.jsx';
+import { useAuth } from '../hooks/useAuth';
 
-const DashboardLayout = () => {
+interface NavItem {
+  path: string;
+  icon: React.ElementType;
+  label: string;
+}
+
+const DashboardLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-
-  const navItems = [
+  
+  const navItems: NavItem[] = [
     { path: '/chats', icon: MessageSquare, label: 'Conversations' },
     { path: '/contacts', icon: Users, label: 'Contacts' },
     { path: '/groups', icon: GroupIcon, label: 'Groups' },
@@ -28,7 +34,7 @@ const DashboardLayout = () => {
     { path: '/workflows', icon: Workflow, label: 'Workflows' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
-
+  
   const pageTitle = navItems.find(item => location.pathname.startsWith(item.path))?.label || 'Dashboard';
 
   return (
